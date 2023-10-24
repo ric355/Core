@@ -1,7 +1,7 @@
 {
 Ultibo UDP (User Datagram Protocol) unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -1105,7 +1105,7 @@ begin
           end;
 
          {Check for Timeout}
-         if GetTickCount64 > (StartTime + ATimeout) then
+         if GetTickCount64 >= (StartTime + ATimeout) then
           begin
            {Return Error}
            Result:=SOCKET_ERROR;
@@ -1154,7 +1154,7 @@ begin
           end;
 
          {Check for Timeout}
-         if GetTickCount64 > (StartTime + ATimeout) then
+         if GetTickCount64 >= (StartTime + ATimeout) then
           begin
            {Return Error}
            Result:=SOCKET_ERROR;
@@ -1947,7 +1947,7 @@ begin
         end; 
 
        {Check for Timeout}
-       if GetTickCount64 > (StartTime + ASocket.SocketOptions.RecvTimeout) then
+       if GetTickCount64 >= (StartTime + ASocket.SocketOptions.RecvTimeout) then
         begin
          NetworkSetLastError(WSAETIMEDOUT);
          Exit;
@@ -2070,7 +2070,7 @@ begin
         end; 
 
        {Check for Timeout}
-       if GetTickCount64 > (StartTime + ASocket.SocketOptions.RecvTimeout) then
+       if GetTickCount64 >= (StartTime + ASocket.SocketOptions.RecvTimeout) then
         begin
          NetworkSetLastError(WSAETIMEDOUT);
          Exit;
@@ -3293,6 +3293,8 @@ begin
  FRecvData.Size:=UDP_BUFFER_SIZE;
 
  {Set Socket Defaults}
+ FSocketOptions.SendBuffer:=UDP_BUFFER_SIZE;
+ FSocketOptions.RecvBuffer:=UDP_BUFFER_SIZE;
  FSocketOptions.SendTimeout:=UDP_TIMEOUT;
  FSocketOptions.RecvTimeout:=UDP_TIMEOUT;
 end;

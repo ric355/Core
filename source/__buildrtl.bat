@@ -8,14 +8,14 @@ set myfpc=%mypath%\bin\i386-win32
 GOTO CheckPath
 
 :DefaultPath
-set mypath=C:\Ultibo\Core\fpc\3.1.1
+set mypath=C:\Ultibo\Core\fpc\3.2.2
 set myfpc=%mypath%\bin\i386-win32
 
 :CheckPath
 IF not exist %mypath%\nul.x GOTO PathError
 IF not exist %myfpc%\fpc.exe GOTO FPCError
 
-set path=%mypath%\bin\i386-win32
+set path=%mypath%\bin\i386-win32;
 
 echo .
 echo ======================Start of Build Script======================

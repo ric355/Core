@@ -1,7 +1,7 @@
 {
 Ultibo Device interface unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -99,10 +99,6 @@ Watchdog Devices
 //unit required would be DWCOTG which could be auto included based on defines
 //for the platform if needed ?
 
-//Question: How do we get the compiler to set a DEFINE based on the ControllerType ?
-//          We know there is one for the Target (ULTIBO) but what about the ControllerType ?
-
-
 {$mode delphi} {Default to Delphi compatible syntax}
 {$H+}          {Default to AnsiString}
 
@@ -111,8 +107,6 @@ unit Devices;
 interface
 
 uses GlobalConfig,GlobalConst,GlobalTypes,Platform,Threads,HeapManager,SysUtils;
-
-//To Do //Do we need Hosts or not ? //Not Yet ?
 
 {==============================================================================}
 {Global definitions}
@@ -125,6 +119,10 @@ const
  
  {Device Signature}
  DEVICE_SIGNATURE = $AD03FE3C;
+ 
+ {Device name constants}
+ DEVICE_NAME_LENGTH = SIZE_64;   {Length of device name}
+ DEVICE_DESC_LENGTH = SIZE_128;  {Length of device description}
  
  {Device Busses}
  DEVICE_BUS_NONE             = 0;
@@ -255,8 +253,10 @@ const
  DEVICE_CLASS_GENERIC         = 56; {A Generic Device}
  DEVICE_CLASS_VIRTIO          = 57; {A VIRTIO Device (eg Block/Network/Memory/Console/Input etc) (Implementing a standard VIRTIO device interface)}
  DEVICE_CLASS_BLUETOOTHHOST   = 58; {A Bluetooth Host Controller (Implementing a standard Bluetooth host interface)}
+ DEVICE_CLASS_JOYSTICK        = 59; {A Joystick or Gamepad Device}
+ DEVICE_CLASS_HID             = 60; {A Human Interface Device (HID)}
  
- DEVICE_CLASS_MAX             = 58;
+ DEVICE_CLASS_MAX             = 60;
  
  DEVICE_CLASS_ANY             = $FFFFFFFF; {Any Device (Pass to DeviceFind or DeviceEnumerate to match all devices)}
  
@@ -320,7 +320,9 @@ const
   'DEVICE_CLASS_MEMORY',
   'DEVICE_CLASS_GENERIC',
   'DEVICE_CLASS_VIRTIO',
-  'DEVICE_CLASS_BLUETOOTHHOST');
+  'DEVICE_CLASS_BLUETOOTHHOST',
+  'DEVICE_CLASS_JOYSTICK',
+  'DEVICE_CLASS_HID');
  
  {Device Notification Flags}
  DEVICE_NOTIFICATION_NONE       = $00000000; {Pass to DeviceNotification to cancel an existing Notification}
@@ -347,6 +349,23 @@ const
  DEVICE_NOTIFICATION_RESIZE     = $00100000;
  DEVICE_NOTIFICATION_RESIZING   = $00200000;
   
+ {Firmware name constants}
+ FIRMWARE_NAME_LENGTH = SIZE_256; {Length of firmware name}
+
+ {Firmware Actions}
+ FIRMWARE_ACTION_NONE    = 0;
+ FIRMWARE_ACTION_SIZE    = 1; {Return the size in bytes of the firmware item}
+ FIRMWARE_ACTION_OPEN    = 2; {Open the firmware item and return a handle}
+ FIRMWARE_ACTION_READ    = 3; {Read from the firmware item specified by a given handle}
+ FIRMWARE_ACTION_SEEK    = 4; {Seek to a location in the firmware item specified by a given handle}
+ FIRMWARE_ACTION_CLOSE   = 5; {Close a handle to the firmware item}
+ FIRMWARE_ACTION_ACQUIRE = 6; {Acquire a memory block containing the firmware item}
+ FIRMWARE_ACTION_RELEASE = 7; {Release a memory block containing the firmware item}
+ 
+ {Firmware Constants}
+ FIRMWARE_WAIT_DELAY = 100;     {Delay between retries for firmware while waiting for timeout (Milliseconds)}
+ FIRMWARE_MAX_BUFFER = SIZE_4M; {Maximum size buffer able to be allocated for firmware by acquire}
+ 
  {Notifier Signature}
  NOTIFIER_SIGNATURE = $6FA1BEC9;
  
@@ -380,6 +399,9 @@ const
  
  {Driver Signature}
  DRIVER_SIGNATURE = $1EB4980A;
+
+ {Driver name constants}
+ DRIVER_NAME_LENGTH = SIZE_64;  {Length of driver name}
  
  {Driver States}
  DRIVER_STATE_UNREGISTERED   = 0;
@@ -402,8 +424,9 @@ const
  DRIVER_CLASS_SDIO            = 3;  {An SDIO Driver (Implementing a standard SDIO driver interface)}
  DRIVER_CLASS_BLUETOOTH       = 4;  {A Bluetooth Driver (Implementing a standard Bluetooth driver interface)}
  DRIVER_CLASS_VIRTIO          = 5;  {A VIRTIO Driver (Implementing a standard VIRTIO driver interface)}
+ DRIVER_CLASS_HID             = 6;  {A Human Interface Device (HID) Driver (Implementing a standard HID driver interface)}
  
- DRIVER_CLASS_MAX             = 5;
+ DRIVER_CLASS_MAX             = 6;
  
  DRIVER_CLASS_ANY             = $FFFFFFFF; {Any Driver (Pass to DriverFind or DriverEnumerate to match all drivers)}
 
@@ -414,7 +437,8 @@ const
   'DRIVER_CLASS_PCI',
   'DRIVER_CLASS_SDIO',
   'DRIVER_CLASS_BLUETOOTH',
-  'DRIVER_CLASS_VIRTIO');
+  'DRIVER_CLASS_VIRTIO',
+  'DRIVER_CLASS_HID');
  
 {==============================================================================}
 const
@@ -423,6 +447,9 @@ const
  
  {Host Signature}
  HOST_SIGNATURE = $F45D30FE;
+
+ {Host name constants}
+ HOST_NAME_LENGTH = SIZE_64;  {Length of host name}
  
  {Host States}
  HOST_STATE_UNREGISTERED   = 0;
@@ -638,16 +665,42 @@ type
   Signature:LongWord;       {Signature for entry validation}
   DeviceId:LongWord;        {Unique Id of this Device in the Device table}
   DeviceState:LongWord;     {Device state (eg Registered/Unregistered)}
-  DeviceName:String;        {The name of the Device (eg Keyboard0, Storage0 or Network0 etc)}
+  DeviceName:array[0..DEVICE_NAME_LENGTH - 1] of Char; {The name of the Device (eg Keyboard0, Storage0 or Network0 etc)}
   DeviceClass:LongWord;     {The class of this Device (eg DEVICE_CLASS_USB, DEVICE_CLASS_NETWORK, DEVICE_CLASS_STORAGE etc)}
   DeviceBus:LongWord;       {The Bus type for the Device (eg DEVICE_BUS_USB)}
   DeviceType:LongWord;      {A class specific Device type (eg KEYBOARD_TYPE_USB, MOUSE_TYPE_USB, NETWORK_TYPE_ETHERNET etc)}
   DeviceFlags:LongWord;     {The class specific Device flags}
   DeviceData:Pointer;       {A pointer to a class specific Device interface (eg PUSBDevice, PNetworkDevice or PStorageDevice etc) (Used by Drivers)}
-  DeviceDescription:String; {A description of the Device (eg BCM2835 PL011 UART)}
+  DeviceDescription:array[0..DEVICE_DESC_LENGTH - 1] of Char; {A description of the Device (eg BCM2835 PL011 UART)}
   {Internal Properties}
   Prev:PDevice;             {Previous entry in Device table}
   Next:PDevice;             {Next entry in Device table}
+ end;
+ 
+ PDeviceFirmware = ^TDeviceFirmware;
+ 
+ {Device Firmware Handler}
+ TDeviceFirmwareHandler = function(Firmware:PDeviceFirmware;Action:LongWord;var Handle:THandle;var Buffer:Pointer;var Value:LongWord):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
+ 
+ PFirmwareHandle = ^TFirmwareHandle;
+ 
+ {Device Firmware}
+ TDeviceFirmware = record
+  DeviceClass:LongWord;             {The Device class supported by this firmware (or DEVICE_CLASS_ANY for all devices)}
+  Name:array[0..FIRMWARE_NAME_LENGTH - 1] of Char; {The device specific name of the firmware which may be a filename, a device model, id or type}
+  Size:LongWord;                    {For block (memory) based firmware, the size passed to Create or 0 for other firmware types}
+  Buffer:Pointer;                   {For block (memory) based firmware, the buffer passed to Create or nil for other firmware types}
+  Handles:PFirmwareHandle;          {List of currently open handles for this firmware}
+  Handler:TDeviceFirmwareHandler;   {The device specific callback for the handler which provides this firmware}
+  {Internal Properties}
+  Prev:PDeviceFirmware;             {Previous entry in Device Firmware table}
+  Next:PDeviceFirmware;             {Next entry in Device Firmware table}
+ end;
+ 
+ {Firmware Handle}
+ TFirmwareHandle = record
+  Handle:THandle;
+  Next:PFirmwareHandle;
  end;
  
  {Notifier Entry}
@@ -698,7 +751,7 @@ type
   Signature:LongWord;        {Signature for entry validation}
   DriverId:LongWord;         {Unique Id of this Driver in the Driver table}
   DriverState:LongWord;      {Driver state (eg Registered/Unregistered)}
-  DriverName:String;         {Descriptive name for the Driver (eg USB Mouse Driver)}
+  DriverName:array[0..DRIVER_NAME_LENGTH - 1] of Char; {Descriptive name for the Driver (eg USB Mouse Driver)}
   DriverClass:LongWord;      {The class of this Driver (eg DRIVER_CLASS_USB etc)}
   {Internal Properties}
   Prev:PDriver;              {Previous entry in Driver table}
@@ -719,7 +772,7 @@ type
   Signature:LongWord;        {Signature for entry validation}
   HostId:LongWord;           {Unique Id of this Host in the Host table}
   HostState:LongWord;        {Host state (eg Registered/Unregistered)}
-  HostName:String;           {Descriptive name for the Host (eg DWC OTG Host)} 
+  HostName:array[0..HOST_NAME_LENGTH - 1] of Char; {Descriptive name for the Host (eg DWC OTG Host)} 
   HostClass:LongWord;        {The class of this Host (eg HOST_CLASS_USB etc)}
   {Internal Properties}
   Prev:PHost;                {Previous entry in Host table}
@@ -1059,6 +1112,24 @@ function DeviceEnumerate(DeviceClass:LongWord;Callback:TDeviceEnumerate;Data:Poi
 
 function DeviceNotification(Device:PDevice;DeviceClass:LongWord;Callback:TDeviceNotification;Data:Pointer;Notification,Flags:LongWord):LongWord;
 
+function DeviceFirmwareCreate(DeviceClass:LongWord;const Name:String;Buffer:Pointer;Size:LongWord):Boolean;
+
+function DeviceFirmwareRegister(DeviceClass:LongWord;const Name:String;Handler:TDeviceFirmwareHandler):THandle;
+function DeviceFirmwareDeregister(Handle:THandle):LongWord;
+
+function DeviceFirmwareFind(DeviceClass:LongWord;const Name:String):PDeviceFirmware;
+function DeviceFirmwareFindByHandle(Handle:THandle):PDeviceFirmware;
+
+function DeviceFirmwareOpen(DeviceClass:LongWord;const Name:String;Timeout:LongWord;var Handle:THandle):LongWord; 
+function DeviceFirmwareClose(Handle:THandle):LongWord;
+
+function DeviceFirmwareSize(Handle:THandle):LongInt;
+function DeviceFirmwareSeek(Handle:THandle;Position:LongInt):LongInt;
+function DeviceFirmwareRead(Handle:THandle;Buffer:Pointer;Count:LongInt):LongInt;
+
+function DeviceFirmwareAcquire(DeviceClass:LongWord;const Name:String;Timeout:LongWord;var Handle:THandle;var Buffer:Pointer;var Size:LongWord):LongWord;
+function DeviceFirmwareRelease(Handle:THandle;Buffer:Pointer;Size:LongWord):LongWord;
+
 function NotifierAllocate(Device:PDevice;DeviceClass:LongWord;Callback:TDeviceNotification;Data:Pointer;Notification,Flags:LongWord):PNotifier;
 function NotifierRelease(Notifier:PNotifier):LongWord;
 
@@ -1265,11 +1336,11 @@ function SysWatchdogRefresh(Milliseconds:LongWord):LongWord;
 
 {==============================================================================}
 {Device Helper Functions}
-function DeviceGetCount:LongWord; inline;
+function DeviceGetCount:LongWord;
 
 function DeviceCheck(Device:PDevice):PDevice;
 
-function NotifierGetCount:LongWord; inline;
+function NotifierGetCount:LongWord;
 
 function NotifierCheck(Notifier:PNotifier):PNotifier;
 
@@ -1287,7 +1358,7 @@ procedure DeviceLogDebug(Device:PDevice;const AText:String); inline;
 
 {==============================================================================}
 {Driver Helper Functions}
-function DriverGetCount:LongWord; inline;
+function DriverGetCount:LongWord;
 
 function DriverCheck(Driver:PDriver):PDriver;
 
@@ -1296,8 +1367,8 @@ function DriverClassToString(DriverClass:LongWord):String;
 
 {==============================================================================}
 {Clock Device Helper Functions}
-function ClockDeviceGetCount:LongWord; inline;
-function ClockDeviceGetDefault:PClockDevice; inline;
+function ClockDeviceGetCount:LongWord;
+function ClockDeviceGetDefault:PClockDevice;
 function ClockDeviceSetDefault(Clock:PClockDevice):LongWord; 
 
 function ClockDeviceCheck(Clock:PClockDevice):PClockDevice;
@@ -1307,8 +1378,8 @@ function ClockStateToString(ClockState:LongWord):String;
 
 {==============================================================================}
 {Timer Device Helper Functions}
-function TimerDeviceGetCount:LongWord; inline;
-function TimerDeviceGetDefault:PTimerDevice; inline;
+function TimerDeviceGetCount:LongWord;
+function TimerDeviceGetDefault:PTimerDevice;
 function TimerDeviceSetDefault(Timer:PTimerDevice):LongWord; 
 
 function TimerDeviceCheck(Timer:PTimerDevice):PTimerDevice;
@@ -1324,8 +1395,8 @@ function TimerDeviceDeregisterWaiter(Timer:PTimerDevice;Waiter:PTimerWaiter):Lon
 
 {==============================================================================}
 {Random Device Helper Functions}
-function RandomDeviceGetCount:LongWord; inline;
-function RandomDeviceGetDefault:PRandomDevice; inline;
+function RandomDeviceGetCount:LongWord;
+function RandomDeviceGetDefault:PRandomDevice;
 function RandomDeviceSetDefault(Random:PRandomDevice):LongWord; 
 
 function RandomDeviceCheck(Random:PRandomDevice):PRandomDevice;
@@ -1335,8 +1406,8 @@ function RandomStateToString(RandomState:LongWord):String;
 
 {==============================================================================}
 {Mailbox Device Helper Functions}
-function MailboxDeviceGetCount:LongWord; inline;
-function MailboxDeviceGetDefault:PMailboxDevice; inline;
+function MailboxDeviceGetCount:LongWord;
+function MailboxDeviceGetDefault:PMailboxDevice;
 function MailboxDeviceSetDefault(Mailbox:PMailboxDevice):LongWord; 
 
 function MailboxDeviceCheck(Mailbox:PMailboxDevice):PMailboxDevice;
@@ -1346,8 +1417,8 @@ function MailboxStateToString(MailboxState:LongWord):String;
 
 {==============================================================================}
 {Watchdog Device Helper Functions}
-function WatchdogDeviceGetCount:LongWord; inline;
-function WatchdogDeviceGetDefault:PWatchdogDevice; inline;
+function WatchdogDeviceGetCount:LongWord;
+function WatchdogDeviceGetDefault:PWatchdogDevice;
 function WatchdogDeviceSetDefault(Watchdog:PWatchdogDevice):LongWord;
 
 function WatchdogDeviceCheck(Watchdog:PWatchdogDevice):PWatchdogDevice;
@@ -1371,6 +1442,12 @@ var
  DeviceTableCount:LongWord;
  
  DeviceNameLock:TCriticalSectionHandle = INVALID_HANDLE_VALUE;
+
+ DeviceFirmwareTable:PDeviceFirmware;
+ DeviceFirmwareTableLock:TCriticalSectionHandle = INVALID_HANDLE_VALUE;
+ DeviceFirmwareTableCount:LongWord;
+ 
+ DeviceFirmwareDefault:PDeviceFirmware;
  
  NotifierTable:PNotifier;
  NotifierTableLock:TCriticalSectionHandle = INVALID_HANDLE_VALUE;
@@ -1432,6 +1509,12 @@ var
  
 {==============================================================================}
 {==============================================================================}
+{Forward Declarations}
+function FileFirmwareHandler(Firmware:PDeviceFirmware;Action:LongWord;var Handle:THandle;var Buffer:Pointer;var Value:LongWord):LongWord;{$IFDEF i386} stdcall;{$ENDIF} forward;
+function BlockFirmwareHandler(Firmware:PDeviceFirmware;Action:LongWord;var Handle:THandle;var Buffer:Pointer;var Value:LongWord):LongWord;{$IFDEF i386} stdcall;{$ENDIF} forward;
+ 
+{==============================================================================}
+{==============================================================================}
 {Initialization Functions}
 procedure DevicesInit;
 {Initialize the Devices unit and device, notifier and driver tables}
@@ -1454,6 +1537,16 @@ begin
   begin
    if DEVICE_LOG_ENABLED then DeviceLogError(nil,'Failed to create device table locks');
   end;
+
+ {Initialize Device Firmware Table}
+ DeviceFirmwareTable:=nil;
+ DeviceFirmwareTableLock:=CriticalSectionCreate; 
+ DeviceFirmwareTableCount:=0;
+ if DeviceFirmwareTableLock = INVALID_HANDLE_VALUE then
+  begin
+   if DEVICE_LOG_ENABLED then DeviceLogError(nil,'Failed to create device firmware table lock');
+  end;
+ DeviceFirmwareDefault:=nil;
  
  {Initialize Notifier Table}
  NotifierTable:=nil;
@@ -1571,6 +1664,9 @@ begin
    WatchdogRefreshHandler:=SysWatchdogRefresh;
   end; 
 
+ {Register Default File Firmware Handler}
+ DeviceFirmwareRegister(DEVICE_CLASS_ANY,'',FileFirmwareHandler);
+
  DevicesInitialized:=True;
 end;
 
@@ -1653,13 +1749,7 @@ begin
   begin
    {Invalidate Device}
    Device.Signature:=0;
- 
-   {Free the Description}
-   SetLength(Device.DeviceDescription,0);
 
-   {Free the Name}
-   SetLength(Device.DeviceName,0);
- 
    {Free Device}
    FreeMem(Device);
  
@@ -1694,12 +1784,15 @@ begin
    try
     {Check Signature}
     if Device.Signature <> DEVICE_SIGNATURE then Exit;
-    
+
+    {Allocate Result}
+    SetLength(Result,DEVICE_NAME_LENGTH - 1);
+
     {Get Name}
-    Result:=Device.DeviceName;
-    
-    {Return Result}
-    UniqueString(Result);
+    StrLCopy(PChar(Result),Device.DeviceName,DEVICE_NAME_LENGTH - 1);
+
+    {Update Result}
+    SetLength(Result,StrLen(PChar(Result)));
    finally
     {Release Lock}
     CriticalSectionUnlock(DeviceNameLock);
@@ -1732,8 +1825,7 @@ begin
     if Device.Signature <> DEVICE_SIGNATURE then Exit;
     
     {Set Name}
-    Device.DeviceName:=Name;
-    UniqueString(Device.DeviceName);
+    StrLCopy(Device.DeviceName,PChar(Name),DEVICE_NAME_LENGTH - 1);
 
     {Return Result}
     Result:=ERROR_SUCCESS;
@@ -1763,12 +1855,15 @@ begin
    try
     {Check Signature}
     if Device.Signature <> DEVICE_SIGNATURE then Exit;
-    
+
+    {Allocate Result}
+    SetLength(Result,DEVICE_DESC_LENGTH - 1);
+
     {Get Description}
-    Result:=Device.DeviceDescription;
-    
-    {Return Result}
-    UniqueString(Result);
+    StrLCopy(PChar(Result),Device.DeviceDescription,DEVICE_DESC_LENGTH - 1);
+
+    {Update Result}
+    SetLength(Result,StrLen(PChar(Result)));
    finally
     {Release Lock}
     CriticalSectionUnlock(DeviceNameLock);
@@ -1801,8 +1896,7 @@ begin
     if Device.Signature <> DEVICE_SIGNATURE then Exit;
     
     {Set Description}
-    Device.DeviceDescription:=Description;
-    UniqueString(Device.DeviceDescription);
+    StrLCopy(Device.DeviceDescription,PChar(Description),DEVICE_DESC_LENGTH - 1);
 
     {Return Result}
     Result:=ERROR_SUCCESS;
@@ -1829,7 +1923,7 @@ begin
  if Device = nil then Exit;
  if Device.Signature <> DEVICE_SIGNATURE then Exit;
  if Device.DeviceId <> DEVICE_ID_ANY then Exit;
- if Length(Device.DeviceName) = 0 then Exit; 
+ if StrLen(Device.DeviceName) = 0 then Exit; 
  if Device.DeviceClass = DEVICE_CLASS_ANY then Exit;
  
  {Check Device}
@@ -1874,6 +1968,7 @@ begin
     if Result <> ERROR_SUCCESS then Exit;
    
     if DEVICE_LOG_ENABLED then DeviceLogInfo(nil,'Registered device (Handle=' + PtrToHex(Device) + ' Class=' + DeviceClassToString(Device.DeviceClass) + ' Name=' + DeviceGetName(Device) + ')');
+
     {Return Result}
     Result:=ERROR_SUCCESS;
    finally
@@ -1950,6 +2045,7 @@ begin
     Device.DeviceId:=DEVICE_ID_ANY;
  
     if DEVICE_LOG_ENABLED then DeviceLogInfo(nil,'Deregistered device (Handle=' + PtrToHex(Device) + ' Class=' + DeviceClassToString(Device.DeviceClass) + ' Name=' + DeviceGetName(Device) + ')');
+
     {Return Result}
     Result:=ERROR_SUCCESS;
    finally
@@ -2312,6 +2408,814 @@ begin
     begin
      Result:=ERROR_CAN_NOT_COMPLETE;
     end;  
+  end;
+end;
+
+{==============================================================================}
+
+function DeviceFirmwareCreate(DeviceClass:LongWord;const Name:String;Buffer:Pointer;Size:LongWord):Boolean;
+{Create a new block (memory) based firmware entry using the standard block firmware handler}
+{DeviceClass: The class of device this firmware applies to (eg DEVICE_CLASS_NETWORK)(or DEVICE_CLASS_ANY for all devices)}
+{Buffer: A pointer to a block of memory containing the firmware to be provided to requesting devices}
+{Size: The size in bytes of the block pointed to by buffer}
+{Return: True if the new firmware entry was added or False on failure}
+
+{Note: Can be used by device drivers to register built in firmware as a device firmware provider}
+{Note: The supplied buffer can be statically or dynamically allocated but must not be freed once the device firmware has been created}
+var
+ Handle:THandle;
+ Firmware:PDeviceFirmware;
+begin
+ {}
+ Result:=False;
+
+ {Check Device Class}
+ if (DeviceClass <> DEVICE_CLASS_ANY) and (DeviceClass > DEVICE_CLASS_MAX) then Exit;
+
+ {Check Name}
+ if Length(Name) = 0 then Exit;
+
+ {Check Buffer}
+ if Buffer = nil then Exit;
+
+ {Check Size}
+ if Size = 0 then Exit;
+
+ {Register Block Firmware Handler}
+ Handle:=DeviceFirmwareRegister(DeviceClass,Name,BlockFirmwareHandler);
+ if Handle <> INVALID_HANDLE_VALUE then
+  begin
+   {Acquire the Lock}
+   if CriticalSectionLock(DeviceFirmwareTableLock) = ERROR_SUCCESS then
+    begin
+     try
+      {Find Firmware}
+      Firmware:=DeviceFirmwareFind(DeviceClass,Name);
+      if Firmware = nil then Exit;
+
+      {Check Firmware}
+      if (THandle(Firmware) <> Handle) or (Firmware = DeviceFirmwareDefault) then
+       begin
+        {Deregister Firmware}
+        DeviceFirmwareDeregister(Handle);
+
+        Exit;
+       end; 
+
+      {Update Firmware}
+      Firmware.Buffer:=Buffer;
+      Firmware.Size:=Size;
+
+      {Return Result}
+      Result:=True;
+     finally
+      {Release the Lock}
+      CriticalSectionUnlock(DeviceFirmwareTableLock);
+     end;
+    end;
+  end;
+end;
+
+{==============================================================================}
+
+function DeviceFirmwareRegister(DeviceClass:LongWord;const Name:String;Handler:TDeviceFirmwareHandler):THandle;
+{Register a new device firmware handler for acquiring device specific firmware}
+{DeviceClass: The class of device this firmware applies to (eg DEVICE_CLASS_NETWORK)(or DEVICE_CLASS_ANY for all devices)}
+{Name: The name of the device firmware, device specific may be a filename, a device model, id or type}
+{Handler: The handler function which is to be called when a device requests this firmware}
+{Return: A handle for the new firmware handler on success or INVALID_HANDLE_VALUE on failure}
+
+{Note: Used by device firmware providers to register firmware for device drivers}
+var
+ Firmware:PDeviceFirmware;
+begin
+ {}
+ Result:=INVALID_HANDLE_VALUE;
+
+ {Check Device Class}
+ if (DeviceClass <> DEVICE_CLASS_ANY) and (DeviceClass > DEVICE_CLASS_MAX) then Exit;
+
+ {Check Name (Blank only allowed for default handler)}
+ if (Length(Name) = 0) and (DeviceFirmwareDefault <> nil) then Exit;
+
+ {Check Handler}
+ if not Assigned(Handler) then Exit;
+
+ {Create Firmware}
+ if DEVICE_SHARED_MEMORY then
+  begin
+   Firmware:=AllocSharedMem(SizeOf(TDeviceFirmware));
+  end
+ else
+  begin
+   Firmware:=AllocMem(SizeOf(TDeviceFirmware));
+  end;
+ if Firmware = nil then Exit;
+
+ {Update Firmware}
+ Firmware.DeviceClass:=DeviceClass;
+ Firmware.Name:=Name;
+ Firmware.Handler:=Handler;
+
+ {Insert Firmware}
+ if CriticalSectionLock(DeviceFirmwareTableLock) = ERROR_SUCCESS then
+  begin
+   try
+    {Link Firmware}
+    if DeviceFirmwareTable = nil then
+     begin
+      DeviceFirmwareTable:=Firmware;
+     end
+    else
+     begin
+      Firmware.Next:=DeviceFirmwareTable;
+      DeviceFirmwareTable.Prev:=Firmware;
+      DeviceFirmwareTable:=Firmware;
+     end;
+
+    {Increment Count}
+    Inc(DeviceFirmwareTableCount);
+
+    {Check Default}
+    if Length(Name) = 0 then DeviceFirmwareDefault:=Firmware;
+
+    if DEVICE_LOG_ENABLED then DeviceLogInfo(nil,'Registered device firmware (Handle=' + PtrToHex(Firmware) + ' Class=' + DeviceClassToString(Firmware.DeviceClass) + ' Name=' + Firmware.Name + ')');
+    
+    {Return Result}
+    Result:=THandle(Firmware);
+   finally
+    CriticalSectionUnlock(DeviceFirmwareTableLock);
+   end;
+  end
+ else
+  begin
+   FreeMem(Firmware);
+  end;
+end;
+
+{==============================================================================}
+
+function DeviceFirmwareDeregister(Handle:THandle):LongWord;
+{Deregister an existing device firmware handler}
+{Handle: The handle returned by Register}
+{Return: ERROR_SUCCESS on completion or another error code on failure}
+
+{Note: Used by device firmware providers to deregister firmware for device drivers}
+var
+ Prev:PDeviceFirmware;
+ Next:PDeviceFirmware;
+ Firmware:PDeviceFirmware;
+ NextHandle:PFirmwareHandle;
+ FirmwareHandle:PFirmwareHandle;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {Check Handle}
+ if Handle = INVALID_HANDLE_VALUE then Exit;
+
+ {Remove Firmware}
+ if CriticalSectionLock(DeviceFirmwareTableLock) = ERROR_SUCCESS then
+  begin
+   try
+    {Find Firmware}
+    Firmware:=nil;
+    Next:=DeviceFirmwareTable;
+    while Next <> nil do
+     begin
+      {Check Firmware}
+      if THandle(Next) = Handle then
+       begin
+        Firmware:=Next;
+        Break;
+       end;
+
+      {Get Next}
+      Next:=Next.Next;
+     end;
+    if Firmware = nil then Exit;
+
+    {Check Default}
+    if Firmware = DeviceFirmwareDefault then Exit;
+
+    {Unlink Device}
+    Prev:=Firmware.Prev;
+    Next:=Firmware.Next;
+    if Prev = nil then
+     begin
+      DeviceFirmwareTable:=Next;
+      if Next <> nil then
+       begin
+        Next.Prev:=nil;
+       end;
+     end
+    else
+     begin
+      Prev.Next:=Next;
+      if Next <> nil then
+       begin
+        Next.Prev:=Prev;
+       end;
+     end;
+
+    {Decrement Count}
+    Dec(DeviceFirmwareTableCount);
+
+    {Free Handles}
+    FirmwareHandle:=Firmware.Handles;
+    while FirmwareHandle <> nil do
+     begin
+      {Save Next}
+      NextHandle:=FirmwareHandle.Next;
+
+      {Free Handle}
+      FreeMem(FirmwareHandle);
+
+      {Get Next}
+      FirmwareHandle:=NextHandle;
+     end;
+
+    {Free Firmware}
+    FreeMem(Firmware);
+
+    if DEVICE_LOG_ENABLED then DeviceLogInfo(nil,'Deregistered device firmware (Handle=' + HandleToHex(Handle) + ')');
+    
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   finally
+    CriticalSectionUnlock(DeviceFirmwareTableLock);
+   end;
+  end
+ else
+  begin
+   Result:=ERROR_CAN_NOT_COMPLETE;
+  end;  
+end;
+
+{==============================================================================}
+
+function DeviceFirmwareFind(DeviceClass:LongWord;const Name:String):PDeviceFirmware;
+{Find an existing device firmware handler for a specified device}
+{DeviceClass: The class of device for the firmware (eg DEVICE_CLASS_NETWORK)(or DEVICE_CLASS_ANY for any class)}
+{Name: The name of the device firmware which is a device specific value such as a filename, a device model, id or type}
+{Return: A pointer to the device firmware entry which contains the details of the handler}
+
+{Note: Used internally to locate compatible firmware for a device firmware open request}
+var
+ Firmware:PDeviceFirmware;
+begin
+ {}
+ Result:=nil;
+
+ {Check Device Class}
+ if (DeviceClass <> DEVICE_CLASS_ANY) and (DeviceClass > DEVICE_CLASS_MAX) then Exit;
+
+ {Check Name}
+ if Length(Name) = 0 then Exit;
+
+ {Acquire the Lock}
+ if CriticalSectionLock(DeviceFirmwareTableLock) = ERROR_SUCCESS then
+  begin
+   try
+    {Find Firmware}
+    Firmware:=DeviceFirmwareTable;
+    while Firmware <> nil do
+     begin
+      {Check Class}
+      if (DeviceClass = DEVICE_CLASS_ANY) or (Firmware.DeviceClass = DeviceClass) then
+       begin
+        {Check Name}
+        if (StrLen(Firmware.Name) > 0) and (Uppercase(Firmware.Name) = Uppercase(Name)) then
+         begin
+          Result:=Firmware;
+          Exit;
+         end;
+       end;
+
+      {Get Next}
+      Firmware:=Firmware.Next;
+     end;
+
+    {Return Default}
+    Result:=DeviceFirmwareDefault;
+   finally
+    {Release the Lock}
+    CriticalSectionUnlock(DeviceFirmwareTableLock);
+   end;
+  end;
+end;
+
+{==============================================================================}
+
+function DeviceFirmwareFindByHandle(Handle:THandle):PDeviceFirmware;
+{Find an existing device firmware handler from a returned handle}
+{Handle: A handle to the firmware returned by Open or Acquire}
+{Return: A pointer to the device firmware entry which contains the details of the handler}
+
+{Note: Used internally to locate referenced firmware for a device firmware request}
+var
+ Firmware:PDeviceFirmware;
+ FirmwareHandle:PFirmwareHandle;
+begin
+ {}
+ Result:=nil;
+
+ {Check Handle}
+ if Handle = INVALID_HANDLE_VALUE then Exit;
+
+ {Acquire the Lock}
+ if CriticalSectionLock(DeviceFirmwareTableLock) = ERROR_SUCCESS then
+  begin
+   try
+    {Find Firmware}
+    Firmware:=DeviceFirmwareTable;
+    while Firmware <> nil do
+     begin
+      {Check Handles}
+      FirmwareHandle:=Firmware.Handles;
+      while FirmwareHandle <> nil do
+       begin
+        {Check Handle}
+        if FirmwareHandle.Handle = Handle then
+         begin
+          Result:=Firmware;
+          Exit;
+         end;
+
+        {Get Next}
+        FirmwareHandle:=FirmwareHandle.Next;
+       end;
+
+      {Get Next}
+      Firmware:=Firmware.Next;
+     end;
+   finally
+    {Release the Lock}
+    CriticalSectionUnlock(DeviceFirmwareTableLock);
+   end;
+  end;
+end;
+
+{==============================================================================}
+
+function DeviceFirmwareOpen(DeviceClass:LongWord;const Name:String;Timeout:LongWord;var Handle:THandle):LongWord; 
+{Open the firmware for a specified device from a registered handler}
+{DeviceClass: The class of device for the firmware (eg DEVICE_CLASS_NETWORK)(or DEVICE_CLASS_ANY for any class)}
+{Name: The name of the device firmware which is a device specific value such as a filename, a device model, id or type}
+{Timeout: Number of milliseconds to wait for the device firmware to be ready (0 to not wait, INFINITE to wait forever)}
+{Handle: A variable to receive a handle to the firmware on return}
+{Return: ERROR_SUCCESS on completion, ERROR_NOT_FOUND if no handler can supply firmware or another error code on failure}
+
+{Note: A handler may return ERROR_NOT_READY if the firmware may be accepted but is not available yet}
+var
+ Wait:Int64;
+ Size:LongWord;
+ Buffer:Pointer;
+ DefaultName:String;
+ DefaultClass:LongWord;
+ Firmware:PDeviceFirmware;
+ FirmwareHandle:PFirmwareHandle;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {$IFDEF DEVICE_DEBUG}
+ if DEVICE_LOG_ENABLED then DeviceLogDebug(nil,'Device Firmware Open (Class=' + DeviceClassToString(DeviceClass) + ' Name=' + Name + ' Timeout=' + IntToStr(Timeout) + ')');
+ {$ENDIF}
+
+ {Set Defaults}
+ Handle:=INVALID_HANDLE_VALUE;
+ Buffer:=nil;
+ Size:=0;
+
+ {Check Device Class}
+ if (DeviceClass <> DEVICE_CLASS_ANY) and (DeviceClass > DEVICE_CLASS_MAX) then Exit;
+
+ {Check Name}
+ if Length(Name) = 0 then Exit;
+
+ {Acquire the Lock}
+ if CriticalSectionLock(DeviceFirmwareTableLock) = ERROR_SUCCESS then
+  begin
+   try
+    Result:=ERROR_NOT_FOUND;
+
+    {Find Firmware}
+    Firmware:=DeviceFirmwareFind(DeviceClass,Name);
+    if Firmware = nil then Exit;
+
+    {Check Default}
+    if Firmware = DeviceFirmwareDefault then
+     begin
+      {Store Name and Class}
+      DefaultName:=Firmware.Name;
+      DefaultClass:=Firmware.DeviceClass;
+     end;
+    try
+     {Wait Timeout}
+     Wait:=0;
+     if Timeout <> INFINITE then Wait:=ClockGetTotal + (Timeout * CLOCK_CYCLES_PER_MILLISECOND);
+     repeat
+      {Check Default}
+      if Firmware = DeviceFirmwareDefault then
+       begin
+        {Update Name and Class}
+        Firmware.Name:=Name;
+        Firmware.DeviceClass:=DeviceClass;
+       end;
+
+      {Call Handler (Open)}
+      Result:=Firmware.Handler(Firmware,FIRMWARE_ACTION_OPEN,Handle,Buffer,Size);
+
+      {Check Result}
+      if Result <> ERROR_NOT_READY then Break;
+
+      {Check Timeout}
+      if Timeout = 0 then Break;
+
+      {Check Default}
+      if Firmware = DeviceFirmwareDefault then
+       begin
+        {Restore Name and Class}
+        Firmware.Name:=DefaultName;
+        Firmware.DeviceClass:=DefaultClass;
+       end;
+
+      {Release the Lock}
+      CriticalSectionUnlock(DeviceFirmwareTableLock);
+
+      {Wait}
+      Sleep(FIRMWARE_WAIT_DELAY);
+
+      {Acquire the Lock}
+      if CriticalSectionLock(DeviceFirmwareTableLock) <> ERROR_SUCCESS then
+       begin
+        Result:=ERROR_OPERATION_FAILED;
+        Exit;
+       end;
+
+     until (Timeout <> INFINITE) and (ClockGetTotal > Wait);
+
+     {Check Result}
+     if (Result = ERROR_SUCCESS) and (Handle <> INVALID_HANDLE_VALUE) then
+      begin
+       {Create Handle}
+       FirmwareHandle:=AllocMem(SizeOf(TFirmwareHandle));
+       if FirmwareHandle = nil then Exit;
+
+       {Update Handle}
+       FirmwareHandle.Handle:=Handle;
+
+       {Add Handle}
+       if Firmware.Handles <> nil then
+        begin
+         FirmwareHandle.Next:=Firmware.Handles;
+        end;
+       Firmware.Handles:=FirmwareHandle
+      end;
+    finally
+     {Check Default}
+     if Firmware = DeviceFirmwareDefault then
+      begin
+       {Restore Name and Class}
+       Firmware.Name:=DefaultName;
+       Firmware.DeviceClass:=DefaultClass;
+      end; 
+    end;
+   finally
+    {Release the Lock}
+    CriticalSectionUnlock(DeviceFirmwareTableLock);
+   end;
+  end;
+end;
+
+{==============================================================================}
+
+function DeviceFirmwareClose(Handle:THandle):LongWord;
+{Close a handle to the firmware for a specified device from a registered handler}
+{Handle: The handle to the firmware as returned by Open}
+{Return: ERROR_SUCCESS on completion, ERROR_NOT_FOUND if no handler accepts this firmware or another error code on failure}
+var
+ Size:LongWord;
+ Buffer:Pointer;
+ Firmware:PDeviceFirmware;
+ FirmwareHandle:PFirmwareHandle;
+ PreviousHandle:PFirmwareHandle;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {$IFDEF DEVICE_DEBUG}
+ if DEVICE_LOG_ENABLED then DeviceLogDebug(nil,'Device Firmware Close (Handle=' + HandleToHex(Handle) + ')');
+ {$ENDIF}
+
+ {Check Handle}
+ if Handle = INVALID_HANDLE_VALUE then Exit;
+
+ {Acquire the Lock}
+ if CriticalSectionLock(DeviceFirmwareTableLock) = ERROR_SUCCESS then
+  begin
+   try
+    Result:=ERROR_NOT_FOUND;
+
+    {Find Firmware}
+    Firmware:=DeviceFirmwareFindByHandle(Handle);
+    if Firmware = nil then Exit;
+
+    {Set Values}
+    Size:=0;
+    Buffer:=nil;
+
+    {Call Handler (Close)}
+    Result:=Firmware.Handler(Firmware,FIRMWARE_ACTION_CLOSE,Handle,Buffer,Size);
+
+    {Check Result}
+    if (Result = ERROR_SUCCESS) and (Handle <> INVALID_HANDLE_VALUE) then
+     begin
+      {Find Handle}
+      PreviousHandle:=nil;
+      FirmwareHandle:=Firmware.Handles;
+      while FirmwareHandle <> nil do
+       begin
+        {Check Handle}
+        if FirmwareHandle.Handle = Handle then Break;
+
+        {Get Next}
+        PreviousHandle:=FirmwareHandle;
+        FirmwareHandle:=FirmwareHandle.Next;
+       end;
+
+      {Check Handle}
+      if FirmwareHandle = nil then Exit;
+
+      {Remove Handle}
+      if PreviousHandle <> nil then
+       begin
+        PreviousHandle.Next:=FirmwareHandle.Next;
+       end
+      else
+       begin
+        Firmware.Handles:=FirmwareHandle.Next;
+       end;
+
+      {Free Handle}
+      FreeMem(FirmwareHandle);
+     end;
+   finally
+    {Release the Lock}
+    CriticalSectionUnlock(DeviceFirmwareTableLock);
+   end;
+  end;
+end;
+
+{==============================================================================}
+
+function DeviceFirmwareSize(Handle:THandle):LongInt;
+{Return the size of the firmware for a specified device from a registered handler}
+{Handle: The handle to the firmware as returned by Open}
+{Return: The size of the firmware on success or -1 on failure}
+var
+ Size:LongWord;
+ Buffer:Pointer;
+ Firmware:PDeviceFirmware;
+begin
+ {}
+ Result:=-1;
+
+ {$IFDEF DEVICE_DEBUG}
+ if DEVICE_LOG_ENABLED then DeviceLogDebug(nil,'Device Firmware Size (Handle=' + HandleToHex(Handle) + ')');
+ {$ENDIF}
+
+ {Check Handle}
+ if Handle = INVALID_HANDLE_VALUE then Exit;
+
+ {Acquire the Lock}
+ if CriticalSectionLock(DeviceFirmwareTableLock) = ERROR_SUCCESS then
+  begin
+   try
+    {Find Firmware}
+    Firmware:=DeviceFirmwareFindByHandle(Handle);
+    if Firmware = nil then Exit;
+
+    {Set Values}
+    Size:=0;
+    Buffer:=nil;
+
+    {Call Handler (Size)}
+    if Firmware.Handler(Firmware,FIRMWARE_ACTION_SIZE,Handle,Buffer,Size) = ERROR_SUCCESS then
+     begin
+      {Return Size}
+      Result:=LongInt(Size);
+     end;
+   finally
+    {Release the Lock}
+    CriticalSectionUnlock(DeviceFirmwareTableLock);
+   end;
+  end;
+end;
+
+{==============================================================================}
+
+function DeviceFirmwareSeek(Handle:THandle;Position:LongInt):LongInt;
+{Seek to a position within the firmware for a specified device from a registered handler}
+{Handle: The handle to the firmware as returned by Open}
+{Position: The byte position within the firmware to seek to}
+{Return: The new position within the firmware on success or -1 on failure}
+var
+ Size:LongWord;
+ Buffer:Pointer;
+ Firmware:PDeviceFirmware;
+begin
+ {}
+ Result:=-1;
+
+ {$IFDEF DEVICE_DEBUG}
+ if DEVICE_LOG_ENABLED then DeviceLogDebug(nil,'Device Firmware Seek (Handle=' + HandleToHex(Handle) + ' Position=' + IntToStr(Position) + ')');
+ {$ENDIF}
+
+ {Check Handle}
+ if Handle = INVALID_HANDLE_VALUE then Exit;
+
+ {Acquire the Lock}
+ if CriticalSectionLock(DeviceFirmwareTableLock) = ERROR_SUCCESS then
+  begin
+   try
+    {Find Firmware}
+    Firmware:=DeviceFirmwareFindByHandle(Handle);
+    if Firmware = nil then Exit;
+
+    {Set Values}
+    Size:=LongWord(Position);
+    Buffer:=nil;
+
+    {Call Handler (Seek)}
+    if Firmware.Handler(Firmware,FIRMWARE_ACTION_SEEK,Handle,Buffer,Size) = ERROR_SUCCESS then
+     begin
+      {Return Position}
+      Result:=LongInt(Size);
+     end;
+   finally
+    {Release the Lock}
+    CriticalSectionUnlock(DeviceFirmwareTableLock);
+   end;
+  end;
+end;
+
+{==============================================================================}
+
+function DeviceFirmwareRead(Handle:THandle;Buffer:Pointer;Count:LongInt):LongInt;
+{Read into a buffer from the firmware for a specified device from a registered handler}
+{Handle: The handle to the firmware as returned by Open}
+{Buffer: A pointer to a buffer to receive the data}
+{Count: The maximum number of bytes to be read}
+{Return: The number of bytes read on success or -1 on failure}
+var
+ Size:LongWord;
+ Firmware:PDeviceFirmware;
+begin
+ {}
+ Result:=-1;
+
+ {$IFDEF DEVICE_DEBUG}
+ if DEVICE_LOG_ENABLED then DeviceLogDebug(nil,'Device Firmware Read (Handle=' + HandleToHex(Handle) + ' Buffer=' + PtrToHex(Buffer) + ' Count=' + IntToStr(Count) + ')');
+ {$ENDIF}
+
+ {Check Handle}
+ if Handle = INVALID_HANDLE_VALUE then Exit;
+
+ {Acquire the Lock}
+ if CriticalSectionLock(DeviceFirmwareTableLock) = ERROR_SUCCESS then
+  begin
+   try
+    {Find Firmware}
+    Firmware:=DeviceFirmwareFindByHandle(Handle);
+    if Firmware = nil then Exit;
+
+    {Set Values}
+    Size:=LongWord(Count);
+
+    {Call Handler (Read)}
+    if Firmware.Handler(Firmware,FIRMWARE_ACTION_READ,Handle,Buffer,Size) = ERROR_SUCCESS then
+     begin
+      {Return Count}
+      Result:=LongInt(Size);
+     end;
+   finally
+    {Release the Lock}
+    CriticalSectionUnlock(DeviceFirmwareTableLock);
+   end;
+  end;
+end;
+
+{==============================================================================}
+
+function DeviceFirmwareAcquire(DeviceClass:LongWord;const Name:String;Timeout:LongWord;var Handle:THandle;var Buffer:Pointer;var Size:LongWord):LongWord;
+{Acquire a memory block containing the firmware for a specified device from a registered handler}
+{DeviceClass: The class of device for the firmware (eg DEVICE_CLASS_NETWORK)(or DEVICE_CLASS_ANY for any class)}
+{Name: The name of the device firmware which is a device specific value such as a filename, a device model, id or type}
+{Timeout: Number of milliseconds to wait for the device firmware to be ready (0 to not wait, INFINITE to wait forever)}
+{Handle: A variable to receive a handle to the firmware on return}
+{Buffer: A variable to receive a pointer to the block of memory containing the firmware on return}
+{Size: A variable to receive the size of the memory block pointed to by buffer on return}
+{Return: ERROR_SUCCESS on completion, ERROR_NOT_FOUND if no handler can supply firmware or another error code on failure}
+
+{Note: A handler may return ERROR_NOT_READY if the firmware may be accepted but is not available yet}
+{Note: A handler may return ERROR_MORE_DATA if the size of the firmware is larger than can be returned in a single buffer}
+var
+ Wait:Int64;
+ DefaultName:String;
+ DefaultClass:LongWord;
+ Firmware:PDeviceFirmware;
+ FirmwareHandle:PFirmwareHandle;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {$IFDEF DEVICE_DEBUG}
+ if DEVICE_LOG_ENABLED then DeviceLogDebug(nil,'Device Firmware Acquire (Class=' + DeviceClassToString(DeviceClass) + ' Name=' + Name + ' Timeout=' + IntToStr(Timeout) + ')');
+ {$ENDIF}
+
+ {Set Defaults}
+ Handle:=INVALID_HANDLE_VALUE;
+ Buffer:=nil;
+ Size:=0;
+
+ {Check Device Class}
+ if (DeviceClass <> DEVICE_CLASS_ANY) and (DeviceClass > DEVICE_CLASS_MAX) then Exit;
+
+ {Check Name}
+ if Length(Name) = 0 then Exit;
+
+ {Acquire the Lock}
+ if CriticalSectionLock(DeviceFirmwareTableLock) = ERROR_SUCCESS then
+  begin
+   try
+    Result:=ERROR_NOT_FOUND;
+
+    {Find Firmware}
+    Firmware:=DeviceFirmwareFind(DeviceClass,Name);
+    if Firmware = nil then Exit;
+
+    {Open Firmware}
+    Result:=DeviceFirmwareOpen(DeviceClass,Name,Timeout,Handle);
+
+    {Check Result}
+    if (Result = ERROR_SUCCESS) and (Handle <> INVALID_HANDLE_VALUE) then
+     begin
+      {Call Handler (Acquire)}
+      Result:=Firmware.Handler(Firmware,FIRMWARE_ACTION_ACQUIRE,Handle,Buffer,Size);
+     end;
+   finally
+    {Release the Lock}
+    CriticalSectionUnlock(DeviceFirmwareTableLock);
+   end;
+  end;
+end;
+
+{==============================================================================}
+
+function DeviceFirmwareRelease(Handle:THandle;Buffer:Pointer;Size:LongWord):LongWord;
+{Release a memory block containing the firmware for a specified device from a registered handler}
+{Handle: The handle to the firmware as returned by Acquire}
+{Buffer: The pointer to the block of memory containing the firmware as returned by Acquire}
+{Size: The size of the memory block as returned by Acquire}
+{Return: ERROR_SUCCESS on completion, ERROR_NOT_FOUND if no handler accepts this firmware or another error code on failure}
+var
+ Firmware:PDeviceFirmware;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {$IFDEF DEVICE_DEBUG}
+ if DEVICE_LOG_ENABLED then DeviceLogDebug(nil,'Device Firmware Release (Handle=' + HandleToHex(Handle) + ' Buffer=' + PtrToHex(Buffer) + ' Size=' + IntToStr(Size) + ')');
+ {$ENDIF}
+
+ {Check Handle}
+ if Handle = INVALID_HANDLE_VALUE then Exit;
+
+ {Acquire the Lock}
+ if CriticalSectionLock(DeviceFirmwareTableLock) = ERROR_SUCCESS then
+  begin
+   try
+    Result:=ERROR_NOT_FOUND;
+
+    {Find Firmware}
+    Firmware:=DeviceFirmwareFindByHandle(Handle);
+    if Firmware = nil then Exit;
+
+    {Call Handler (Release)}
+    Result:=Firmware.Handler(Firmware,FIRMWARE_ACTION_RELEASE,Handle,Buffer,Size);
+
+    {Check Result}
+    if (Result = ERROR_SUCCESS) and (Handle <> INVALID_HANDLE_VALUE) then
+     begin
+      {Close Firmware}
+      Result:=DeviceFirmwareClose(Handle);
+     end;
+   finally
+    {Release the Lock}
+    CriticalSectionUnlock(DeviceFirmwareTableLock);
+   end;
   end;
 end;
 
@@ -2799,7 +3703,7 @@ begin
  Driver.Signature:=DRIVER_SIGNATURE;
  Driver.DriverId:=DRIVER_ID_ANY;
  Driver.DriverState:=DRIVER_STATE_UNREGISTERED;
- Driver.DriverName:=''; 
+ Driver.DriverName:='';
  Driver.DriverClass:=DRIVER_CLASS_ANY;
 
  {$IFDEF DEVICE_DEBUG}
@@ -2836,10 +3740,7 @@ begin
   begin
    {Invalidate Driver}
    Driver.Signature:=0;
- 
-   {Free the Name}
-   SetLength(Driver.DriverName,0);
- 
+
    {Free Driver}
    FreeMem(Driver);
   
@@ -2875,11 +3776,14 @@ begin
     {Check Signature}
     if Driver.Signature <> DRIVER_SIGNATURE then Exit;
 
+    {Allocate Result}
+    SetLength(Result,DRIVER_NAME_LENGTH - 1);
+
     {Get Name}
-    Result:=Driver.DriverName;
-    
-    {Return Result}
-    UniqueString(Result);
+    StrLCopy(PChar(Result),Driver.DriverName,DRIVER_NAME_LENGTH - 1);
+
+    {Update Result}
+    SetLength(Result,StrLen(PChar(Result)));
    finally
     {Release Lock}
     CriticalSectionUnlock(DriverNameLock);
@@ -2912,8 +3816,7 @@ begin
     if Driver.Signature <> DRIVER_SIGNATURE then Exit;
     
     {Set Name}
-    Driver.DriverName:=Name;
-    UniqueString(Driver.DriverName);
+    StrLCopy(Driver.DriverName,PChar(Name),DRIVER_NAME_LENGTH - 1);
 
     {Return Result}
     Result:=ERROR_SUCCESS;
@@ -2940,7 +3843,7 @@ begin
  if Driver = nil then Exit;
  if Driver.Signature <> DRIVER_SIGNATURE then Exit;
  if Driver.DriverId <> DRIVER_ID_ANY then Exit;
- if Length(Driver.DriverName) = 0 then Exit; 
+ if StrLen(Driver.DriverName) = 0 then Exit; 
  if Driver.DriverClass = DRIVER_CLASS_ANY then Exit;
  
  {Check Driver}
@@ -6907,7 +7810,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {Device Helper Functions}
-function DeviceGetCount:LongWord; inline;
+function DeviceGetCount:LongWord;
 {Get the current device count}
 begin
  {}
@@ -6955,7 +7858,7 @@ end;
 
 {==============================================================================}
 
-function NotifierGetCount:LongWord; inline;
+function NotifierGetCount:LongWord;
 {Get the current notifier count}
 begin
  {}
@@ -7037,6 +7940,10 @@ begin
  if DeviceClass <= DEVICE_CLASS_MAX then
   begin
    Result:=DEVICE_CLASS_NAMES[DeviceClass];
+  end
+ else if DeviceClass = DEVICE_CLASS_ANY then
+  begin
+   Result:='DEVICE_CLASS_ANY';
   end;
 end;
 
@@ -7254,7 +8161,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {Driver Helper Functions}
-function DriverGetCount:LongWord; inline;
+function DriverGetCount:LongWord;
 {Get the current driver count}
 begin
  {}
@@ -7323,13 +8230,17 @@ begin
  if DriverClass <= DRIVER_CLASS_MAX then
   begin
    Result:=DRIVER_CLASS_NAMES[DriverClass];
+  end
+ else if DriverClass = DRIVER_CLASS_ANY then
+  begin
+   Result:='DRIVER_CLASS_ANY';
   end;
 end;
 
 {==============================================================================}
 {==============================================================================}
 {Clock Device Helper Functions}
-function ClockDeviceGetCount:LongWord; inline;
+function ClockDeviceGetCount:LongWord;
 {Get the current clock device count}
 begin
  {}
@@ -7338,7 +8249,7 @@ end;
 
 {==============================================================================}
 
-function ClockDeviceGetDefault:PClockDevice; inline;
+function ClockDeviceGetDefault:PClockDevice;
 {Get the current default clock device}
 begin
  {}
@@ -7450,7 +8361,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {Timer Device Helper Functions}
-function TimerDeviceGetCount:LongWord; inline;
+function TimerDeviceGetCount:LongWord;
 {Get the current timer device count}
 begin
  {}
@@ -7459,7 +8370,7 @@ end;
 
 {==============================================================================}
 
-function TimerDeviceGetDefault:PTimerDevice; inline;
+function TimerDeviceGetDefault:PTimerDevice;
 {Get the current default timer device}
 begin
  {}
@@ -7706,7 +8617,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {Random Device Helper Functions}
-function RandomDeviceGetCount:LongWord; inline;
+function RandomDeviceGetCount:LongWord;
 {Get the current random device count}
 begin
  {}
@@ -7715,7 +8626,7 @@ end;
 
 {==============================================================================}
 
-function RandomDeviceGetDefault:PRandomDevice; inline;
+function RandomDeviceGetDefault:PRandomDevice;
 {Get the current default random device}
 begin
  {}
@@ -7827,7 +8738,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {Mailbox Device Helper Functions}
-function MailboxDeviceGetCount:LongWord; inline;
+function MailboxDeviceGetCount:LongWord;
 {Get the current mailbox device count}
 begin
  {}
@@ -7836,7 +8747,7 @@ end;
 
 {==============================================================================}
 
-function MailboxDeviceGetDefault:PMailboxDevice; inline;
+function MailboxDeviceGetDefault:PMailboxDevice;
 {Get the current default mailbox device}
 begin
  {}
@@ -7948,7 +8859,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {Watchdog Device Helper Functions}
-function WatchdogDeviceGetCount:LongWord; inline;
+function WatchdogDeviceGetCount:LongWord;
 {Get the current watchdog device count}
 begin
  {}
@@ -7957,7 +8868,7 @@ end;
 
 {==============================================================================}
 
-function WatchdogDeviceGetDefault:PWatchdogDevice; inline;
+function WatchdogDeviceGetDefault:PWatchdogDevice;
 {Get the current default watchdog device}
 begin
  {}
@@ -8064,6 +8975,525 @@ begin
   begin
    Result:=WATCHDOG_STATE_NAMES[WatchdogState];
   end;
+end;
+
+{==============================================================================}
+{==============================================================================}
+{Internal Functions}
+function FileFirmwareHandler(Firmware:PDeviceFirmware;Action:LongWord;var Handle:THandle;var Buffer:Pointer;var Value:LongWord):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
+{Internal handler for file based device firmware}
+{Note: Not intended to be called directly by applications}
+
+ function FileSize(Handle:THandle):LongWord;
+ var
+  Position:LongWord;
+ begin
+  {}
+  {Get Position}
+  Position:=FileSeek(Handle,0,fsFromCurrent);
+
+  {Get Size}
+  Result:=FileSeek(Handle,0,fsFromEnd);
+
+  {Restore Position}
+  FileSeek(Handle,Position,fsFromBeginning);
+ end;
+
+type
+ PFileFirmware = ^TFileFirmware;
+ TFileFirmware = record
+  Handle:THandle;
+  Buffer:Pointer;
+  Size:LongWord;
+ end;
+
+var
+ PathName:String;
+ FileName:String;
+ HandleEntry:PHandleEntry;
+ FileFirmware:PFileFirmware;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {Check Firmware}
+ if Firmware = nil then Exit;
+
+ {Check Action}
+ case Action of
+  FIRMWARE_ACTION_OPEN:begin
+    {Open File}
+    {Check Name}
+    if StrLen(Firmware.Name) = 0 then Exit;
+
+    {Check Device Class}
+    if (Firmware.DeviceClass <> DEVICE_CLASS_ANY) and (Firmware.DeviceClass > DEVICE_CLASS_MAX) then Exit;
+
+    {Set Defaults}
+    Handle:=INVALID_HANDLE_VALUE;
+    Buffer:=nil;
+    Value:=0;
+
+    {Check Path}
+    if Length(DEVICE_FIRMWARE_PATH) = 0 then Exit;
+
+    {Get Drive}
+    PathName:=ExtractFileDrive(DEVICE_FIRMWARE_PATH);
+    if (Length(PathName) > 0) and (PathName[Length(PathName)] = ':') then
+    begin
+      PathName:=IncludeTrailingPathDelimiter(PathName);
+
+      Result:=ERROR_NOT_READY;
+
+      {Check Drive}
+      if not DirectoryExists(PathName) then Exit;
+    end;
+
+    {Get File}
+    FileName:=IncludeTrailingPathDelimiter(DEVICE_FIRMWARE_PATH) + Firmware.Name;
+
+    Result:=ERROR_FILE_NOT_FOUND;
+
+    {Check File}
+    if not FileExists(FileName) then Exit;
+
+    Result:=ERROR_OUTOFMEMORY;
+
+    {Create Data}
+    FileFirmware:=AllocMem(SizeOf(TFileFirmware));
+    if FileFirmware = nil then Exit;
+
+    {Open File}
+    FileFirmware.Handle:=FileOpen(FileName,fmOpenRead or fmShareDenyWrite);
+    if FileFirmware.Handle = INVALID_HANDLE_VALUE then
+     begin
+      {Free Data}
+      FreeMem(FileFirmware);
+
+      Result:=ERROR_OPEN_FAILED;
+      Exit;
+     end;
+
+    {Create Handle}
+    HandleEntry:=HandleCreateEx('',HANDLE_FLAG_NONE,THandle(FileFirmware),HANDLE_TYPE_FIRMWARE);
+    if HandleEntry = nil then
+     begin
+      {Free Data}
+      FreeMem(FileFirmware);
+
+      Result:=ERROR_CAN_NOT_COMPLETE;
+      Exit;
+     end; 
+
+    {Return Handle}
+    Handle:=HandleEntry.Handle;
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+  FIRMWARE_ACTION_CLOSE:begin
+    {Close File}
+    {Check Handle}
+    if Handle = INVALID_HANDLE_VALUE then Exit;
+
+    {Set Defaults}
+    Buffer:=nil;
+    Value:=0;
+
+    {Get Handle}
+    HandleEntry:=HandleGet(Handle);
+    if HandleEntry = nil then Exit;
+    if HandleEntry.Data = INVALID_HANDLE_VALUE then Exit;
+
+    {Get Data}
+    FileFirmware:=PFileFirmware(HandleEntry.Data);
+    if FileFirmware = nil then Exit;
+
+    {Close File}
+    FileClose(FileFirmware.Handle);
+
+    {Close Handle}
+    HandleClose(Handle);
+
+    {Free Data}
+    FreeMem(FileFirmware);
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+  FIRMWARE_ACTION_SIZE:begin
+    {Size File}
+    {Check Handle}
+    if Handle = INVALID_HANDLE_VALUE then Exit;
+
+    {Set Defaults}
+    Buffer:=nil;
+
+    {Get Handle}
+    HandleEntry:=HandleGet(Handle);
+    if HandleEntry = nil then Exit;
+    if HandleEntry.Data = INVALID_HANDLE_VALUE then Exit;
+
+    {Get Data}
+    FileFirmware:=PFileFirmware(HandleEntry.Data);
+    if FileFirmware = nil then Exit;
+
+    {Get Size}
+    Value:=FileSize(FileFirmware.Handle);
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+  FIRMWARE_ACTION_SEEK:begin
+    {Seek File}
+    {Check Handle}
+    if Handle = INVALID_HANDLE_VALUE then Exit;
+
+    {Set Defaults}
+    Buffer:=nil;
+
+    {Get Handle}
+    HandleEntry:=HandleGet(Handle);
+    if HandleEntry = nil then Exit;
+    if HandleEntry.Data = INVALID_HANDLE_VALUE then Exit;
+
+    {Get Data}
+    FileFirmware:=PFileFirmware(HandleEntry.Data);
+    if FileFirmware = nil then Exit;
+
+    {Seek File}
+    Value:=FileSeek(FileFirmware.Handle,LongInt(Value),fsFromBeginning);
+    if Value = LongWord(-1) then Exit;
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+  FIRMWARE_ACTION_READ:begin
+    {Read File}
+    {Check Handle}
+    if Handle = INVALID_HANDLE_VALUE then Exit;
+
+    {Check Buffer}
+    if Buffer = nil then Exit;
+
+    {Check Value}
+    {if Value < 0 then Exit;} {Value is unsigned}
+
+    {Get Handle}
+    HandleEntry:=HandleGet(Handle);
+    if HandleEntry = nil then Exit;
+    if HandleEntry.Data = INVALID_HANDLE_VALUE then Exit;
+
+    {Get Data}
+    FileFirmware:=PFileFirmware(HandleEntry.Data);
+    if FileFirmware = nil then Exit;
+
+    Result:=ERROR_READ_FAULT;
+
+    {Read File}
+    Value:=FileRead(FileFirmware.Handle,Buffer^,Value);
+    if Value = LongWord(-1) then Exit;
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+  FIRMWARE_ACTION_ACQUIRE:begin
+    {Acquire File}
+    {Check Handle}
+    if Handle = INVALID_HANDLE_VALUE then Exit;
+
+    {Set Defaults}
+    Buffer:=nil;
+    Value:=0;
+
+    {Get Handle}
+    HandleEntry:=HandleGet(Handle);
+    if HandleEntry = nil then Exit;
+    if HandleEntry.Data = INVALID_HANDLE_VALUE then Exit;
+
+    {Get Data}
+    FileFirmware:=PFileFirmware(HandleEntry.Data);
+    if FileFirmware = nil then Exit;
+
+    Result:=ERROR_NOT_SUPPORTED;
+
+    {Check Size}
+    FileFirmware.Size:=FileSize(FileFirmware.Handle);
+    if FileFirmware.Size > FIRMWARE_MAX_BUFFER then Exit;
+
+    Result:=ERROR_OUTOFMEMORY;
+    
+    {Allocate Buffer}
+    FileFirmware.Buffer:=GetMem(FileFirmware.Size);
+    if FileFirmware.Buffer = nil then Exit;
+
+    {Read to Buffer}
+    if FileRead(FileFirmware.Handle,FileFirmware.Buffer^,FileFirmware.Size) <> FileFirmware.Size then
+     begin
+      {Free Buffer}
+      FreeMem(FileFirmware.Buffer);
+      FileFirmware.Buffer:=nil;
+      FileFirmware.Size:=0;
+
+      Result:=ERROR_READ_FAULT;
+      Exit;
+     end;
+
+    {Return Buffer and Size}
+    Buffer:=FileFirmware.Buffer;
+    Value:=FileFirmware.Size;
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+  FIRMWARE_ACTION_RELEASE:begin
+    {Release File}
+    {Check Handle}
+    if Handle = INVALID_HANDLE_VALUE then Exit;
+
+    {Get Handle}
+    HandleEntry:=HandleGet(Handle);
+    if HandleEntry = nil then Exit;
+
+    {Get Data}
+    FileFirmware:=PFileFirmware(HandleEntry.Data);
+    if FileFirmware = nil then Exit;
+
+    {Check Buffer}
+    if Buffer = nil then Exit;
+    if Buffer <> FileFirmware.Buffer then Exit;
+
+    {Check Value}
+    if Value = 0 then Exit;
+    if Value <> FileFirmware.Size then Exit;
+
+    {Free Buffer}
+    FreeMem(FileFirmware.Buffer);
+    FileFirmware.Buffer:=nil;
+    FileFirmware.Size:=0;
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+ end;  
+end;
+
+{==============================================================================}
+
+function BlockFirmwareHandler(Firmware:PDeviceFirmware;Action:LongWord;var Handle:THandle;var Buffer:Pointer;var Value:LongWord):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
+{Internal handler for block based device firmware}
+{Note: Not intended to be called directly by applications}
+type
+ PBlockFirmware = ^TBlockFirmware;
+ TBlockFirmware = record
+  Position:LongWord;
+ end;
+
+var
+ Position:LongInt;
+ HandleEntry:PHandleEntry;
+ BlockFirmware:PBlockFirmware;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {Check Firmware}
+ if Firmware = nil then Exit;
+
+ {Check Action}
+ case Action of
+  FIRMWARE_ACTION_OPEN:begin
+    {Open Firmware}
+    {Check Name}
+    if StrLen(Firmware.Name) = 0 then Exit;
+
+    {Check Device Class}
+    if (Firmware.DeviceClass <> DEVICE_CLASS_ANY) and (Firmware.DeviceClass > DEVICE_CLASS_MAX) then Exit;
+
+    {Check Buffer and Size}
+    if Firmware.Buffer = nil then Exit;
+    if Firmware.Size = 0 then Exit;
+
+    {Set Defaults}
+    Handle:=INVALID_HANDLE_VALUE;
+    Buffer:=nil;
+    Value:=0;
+
+    Result:=ERROR_OUTOFMEMORY;
+
+    {Create Data}
+    BlockFirmware:=AllocMem(SizeOf(TBlockFirmware));
+    if BlockFirmware = nil then Exit;
+
+    {Create Handle}
+    HandleEntry:=HandleCreateEx('',HANDLE_FLAG_NONE,THandle(BlockFirmware),HANDLE_TYPE_FIRMWARE);
+    if HandleEntry = nil then
+     begin
+      {Free Data}
+      FreeMem(BlockFirmware);
+
+      Exit;
+     end;
+
+    {Return Handle}
+    Handle:=HandleEntry.Handle;
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+  FIRMWARE_ACTION_CLOSE:begin
+    {Close Firmware}
+    {Check Handle}
+    if Handle = INVALID_HANDLE_VALUE then Exit;
+
+    {Set Defaults}
+    Buffer:=nil;
+    Value:=0;
+
+    {Get Handle}
+    HandleEntry:=HandleGet(Handle);
+    if HandleEntry = nil then Exit;
+    if HandleEntry.Data = INVALID_HANDLE_VALUE then Exit;
+
+    {Get Data}
+    BlockFirmware:=PBlockFirmware(HandleEntry.Data);
+    if BlockFirmware = nil then Exit;
+
+    {Close Handle}
+    HandleClose(Handle);
+
+    {Free Data}
+    FreeMem(BlockFirmware);
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+  FIRMWARE_ACTION_SIZE:begin
+    {Size Firmware}
+    {Check Handle}
+    if Handle = INVALID_HANDLE_VALUE then Exit;
+
+    {Set Defaults}
+    Buffer:=nil;
+
+    {Get Handle}
+    HandleEntry:=HandleGet(Handle);
+    if HandleEntry = nil then Exit;
+
+    {Get Size}
+    Value:=Firmware.Size;
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+  FIRMWARE_ACTION_SEEK:begin
+    {Seek Firmware}
+    {Check Handle}
+    if Handle = INVALID_HANDLE_VALUE then Exit;
+
+    {Set Defaults}
+    Buffer:=nil;
+
+    {Get Handle}
+    HandleEntry:=HandleGet(Handle);
+    if HandleEntry = nil then Exit;
+    if HandleEntry.Data = INVALID_HANDLE_VALUE then Exit;
+
+    {Get Data}
+    BlockFirmware:=PBlockFirmware(HandleEntry.Data);
+    if BlockFirmware = nil then Exit;
+
+    {Get Position}
+    Position:=LongInt(Value);
+
+    {Check Position}
+    if (Position < 0) or (Position > Firmware.Size) then Exit;
+
+    {Update Data}
+    BlockFirmware.Position:=Position;
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+  FIRMWARE_ACTION_READ:begin
+    {Read Firmware}
+    {Check Handle}
+    if Handle = INVALID_HANDLE_VALUE then Exit;
+
+    {Check Buffer}
+    if Buffer = nil then Exit;
+
+    {Check Value}
+    {if Value < 0 then Exit;} {Value is unsigned}
+
+    {Get Handle}
+    HandleEntry:=HandleGet(Handle);
+    if HandleEntry = nil then Exit;
+    if HandleEntry.Data = INVALID_HANDLE_VALUE then Exit;
+
+    {Get Data}
+    BlockFirmware:=PBlockFirmware(HandleEntry.Data);
+    if BlockFirmware = nil then Exit;
+
+    {Adjust Count}
+    if ((BlockFirmware.Position + Value) > Firmware.Size) then
+     begin
+      Value:=Firmware.Size - BlockFirmware.Position;
+     end;
+
+    if Value > 0 then
+     begin
+      {Read Buffer}
+      System.Move(PByte(Firmware.Buffer + BlockFirmware.Position)^,Buffer^,Value);
+
+      {Update Position}
+      BlockFirmware.Position:=BlockFirmware.Position + Value;
+     end;
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+  FIRMWARE_ACTION_ACQUIRE:begin
+    {Acquire Firmware}
+    {Check Handle}
+    if Handle = INVALID_HANDLE_VALUE then Exit;
+
+    {Set Defaults}
+    Buffer:=nil;
+    Value:=0;
+
+    {Get Handle}
+    HandleEntry:=HandleGet(Handle);
+    if HandleEntry = nil then Exit;
+
+    {Return Buffer and Size}
+    Buffer:=Firmware.Buffer;
+    Value:=Firmware.Size;
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+  FIRMWARE_ACTION_RELEASE:begin
+    {Release Firmware}
+    {Check Handle}
+    if Handle = INVALID_HANDLE_VALUE then Exit;
+
+    {Check Buffer}
+    if Buffer = nil then Exit;
+    if Buffer <> Firmware.Buffer then Exit;
+
+    {Check Value}
+    if Value = 0 then Exit;
+    if Value <> Firmware.Size then Exit;
+
+    {Get Handle}
+    HandleEntry:=HandleGet(Handle);
+    if HandleEntry = nil then Exit;
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   end;
+ end;  
 end;
 
 {==============================================================================}

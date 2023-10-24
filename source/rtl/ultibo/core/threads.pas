@@ -1,7 +1,7 @@
 {
 Ultibo Threads interface unit.
            
-Copyright (C) 2020 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -33,7 +33,7 @@ Threads
 
  Locking Primitives
  ------------------
- 
+
   Spin - A simple spin lock for fast mutually exclusive access to data. Threads "spin" while waiting to acquire the lock and do not yield the CPU unless pre-empted.
          Non recursive (can only be acquired once by the same thread)
          Includes IRQ/FIQ entry and exit routines to Save/Restore the IRQ/FIQ state.
@@ -41,48 +41,48 @@ Threads
          Suitable for use on multiprocessor systems if the lock is allocated from shared memory (Determined during initialization).
          Not recommended for long held operations or holding during I/O operations.
          Access is not serialized, the next thread to try obtaining the lock when it is released will succeed even if that thread was not the first waiting.
-  
-         Usage: 
+
+         Usage:
          ------
-         
+
          Create/Destroy
-         
+
          Spin locks are created using SpinCreate() and destroyed using SpinDestroy(), these functions should not be called from within an Interrupt handler.
 
          Lock/Unlock (Data accessed only by threads)
-         
+
          To synchronise data access between threads each thread should call SpinLock() before accessing the data and SpinUnlock() when finished accessing the data.
          These calls do not affect the state of IRQs or FIQs and therefore do not impact interrupt latency.
 
          Lock/Unlock (Data accessed by threads and interrupt handlers)
-         
+
          To use a Spin lock to synchronise data access between threads and an interrupt handler each thread should call SpinLockIRQ() or SpinLockFIQ(), depending on 
          whether the interrupt handler is servicing IRQ or FIQ requests, before accessing the data and SpinUnlockIRQ() or SpinUnlockFIQ() when finished accessing the data.
          These calls disable interrupts before acquiring the lock (with deadlock protection) and restore interrupts after releasing the lock and therefore should only be
          used to protect very short sections of code accessing shared data to minimise the impact on interrupt latency.
-         
+
          Interrupt handlers should call SpinLock() before accessing the data and SpinUnlock() when finished accessing the data. In a Uniprocessor system it is technically
          not neccessary for interrupt handlers to call lock/unlock as the use of IRQ/FIQ disable/enable will prevent interrupt handlers from executing while a thread has the
          lock. On a Multiprocessor system however interrupt handlers can execute on one processor while a thread is executing on another (which will not deadlock), to correctly
          synchronise data access both threads and interrupt handlers should call the appropriate lock/unlock before and after access to the data.
-  
+
          Lock Hierarchy:
          ---------------
          It is safe to acquire one lock using SpinLock() then another lock using SpinLock() and then release them in reverse order.
-         
+
          It is also safe to acquire one lock using SpinLock() then another lock using SpinLockIRQ(or FIQ)() and then release them in reverse order.
-         
+
          It is NOT safe to acquire one lock using SpinLockIRQ(or FIQ)() then another lock using SpinLock() and then release them in reverse order.
          This is because the first SpinLockIRQ(or FIQ)() can disable the scheduling and prevent thread preemption. If another thread is already holding
          the second lock then this sequence will deadlock (Except on a multicore system where the other thread is running on a different CPU).
-         
+
          It is also safe to acquire one lock using SpinLockIRQ(or FIQ)() then another lock using SpinLockIRQ(or FIQ)() and then release them in reverse order.
          In this case you must ensure that any thread acquiring the second lock also calls SpinLockIRQ(or FIQ)() to thereby avoid the deadlock.
-         
+
          It is NOT safe to acquire one lock using SpinLockIRQ(or FIQ)() then another lock using SpinLockIRQ(or FIQ)() and then release them in the SAME order.
          If the situation absolutely requires this behaviour then you must use SpinExchangeIRQ(or FIQ)() when holding both locks in order to reverse the order of the
          IRQ or FIQ re-enabling.
-         
+
 
   Mutex - A mutually exclusive lock for controlling access to data. Threads yield while waiting to acquire the lock.
           Non recursive (can only be acquired once by the same thread) (Recursive if MUTEX_FLAG_RECURSIVE specified)
@@ -90,14 +90,33 @@ Threads
           Suitable for use on multiprocessor systems if the lock is allocated from shared memory (Determined during initialization).
           Recommended for long held operations or holding during I/O operations.
           Access is not serialized, the next thread to try obtaining the lock when it is released will succeed even if that thread was not the first waiting.
- 
-          Usage: 
+
+          Usage:
           ------
-          
+
           Create/Destroy
-          
-          //To Do
- 
+
+          Mutex locks are created using MutexCreate() and destroyed using MutexDestroy(). The MutexCreateEx() function allows additional options to be specified
+          including if the creating thread is the initial owner and flags such as MUTEX_FLAG_RECURSIVE.
+
+          Lock/Unlock
+
+          To use a Mutex lock to synchronise data access between threads each thread should call MutexLock() before accessing the data and MutexUnlock() when
+          finished accessing the data.
+
+          The MutexTryLock() function will attempt to lock the Mutex but will return an error instead of waiting for it if already locked.
+
+          Lock Hierarchy:
+          ---------------
+          It is safe to acquire one lock using MutexLock() then another lock using MutexLock() and then release them in reverse order.
+
+          It is also safe to acquire one lock using MutexLock() then another lock using MutexLock() and then release them in the SAME order.
+
+          It is safe to acquire a Mutex lock using  MutexLock() then aquire a Spin lock using SpinLockIRQ(or FIQ)().
+
+          It is NOT safe to acquire a Spin lock using SpinLockIRQ(or FIQ)() then acquire a Mutex lock using MutexLock().
+
+
   CriticalSection - A mutually exclusive lock for serializing access to data. Threads are placed on a wait list while waiting to acquire the lock.
                     Recursive (can be acquired multiple times by the same thread)
                     Not suitable for use by Interrupt handlers.
@@ -105,148 +124,397 @@ Threads
                     Recommended for long held operations or holding during I/O operations.
                     Access is serialized, the next thread to obtain the lock when it is released will be the thread that has been waiting longest (See also stolen wakeups below).
 
-                    Usage: 
+                    Usage:
                     ------
-                    
+
                     Create/Destroy
-            
-                    //To Do
-                    
-  Semaphore - 
- 
+
+                    Critical Sections are created using CriticalSectionCreate() and destroyed using CriticalSectionDestroy().
+                    The CriticalSectionCreateEx() function allows specifying additional flags and options for the lock.
+
+                    Lock/Unlock
+
+                    To use a Critical Section to synchronise data access between threads each thread should call CriticalSectionLock() before
+                    accessing the data and CriticalSectionUnlock() when finished accessing the data. A CriticalSectionTryLock() function is also
+                    available which will not wait if the lock is unavailable and will return immediately with an error.
+
+                    Because Critical Sections place waiting threads on a wait list they also include the option to specify a timeout
+                    value so a thread will not wait indefinitely to obtain the lock by calling CriticalSectionLockEx().
+
+                    The CriticalSectionLockEx() function will return ERROR_SUCCESS if the lock was obtained, ERROR_WAIT_TIMEOUT if the timeout
+                    value elapsed before obtaining the lock and ERROR_WAIT_ABANDONED if waiting was abandoned because the lock was destroyed or
+                    another thread called ThreadAbandon() with the handle of the waiting thread.
+
+                    It is critical that the return value be checked when using timeouts in order to be certain that the lock was obtained
+                    before accessing the protected data, failure to do so may result in data corruption if multiple threads make changes
+                    at the same time.
+
+                    Lock Hierarchy:
+                    ---------------
+                    All serialized locks and synchronization objects generally follow the same principles as Mutex locks above.
+
+                    It is safe to acquire and release most combinations of serialized objects in any order except where doing so
+                    would create a deadlock between threads where thread 1 holds object A is waiting on object B and thread 2 holds
+                    object B and is waiting on object A.
+
+                    In all cases it is NOT safe to attempt to acquire a serialized object while IRQ or FIQ are disabled such as
+                    after calling SpinLockIRQ(or FIQ)()
+
+
+  Semaphore - A counted serialization object that allows threads to proceed until the count reaches zero after which threads will
+              be made to wait until the count is increased by another thread (or interrupt handler) calling signal.
               Suitable for use by Interrupt handlers for signaling only if created with SEMAPHORE_FLAG_IRQ or FIQ (Interrupt handlers must not call wait).
               Suitable for use on multiprocessor systems.
               Access is serialized, the next thread to acquire the semaphore when it is signaled will be the thread that has been waiting longest (See also stolen wakeups below).
- 
-              Usage: 
+
+              Usage:
               ------
-              
+
               Create/Destroy
-            
-              //To Do
- 
+
+              Semaphores are created using SemaphoreCreate() and destroyed using SemaphoreDestroy(). With additional flags and options
+              available by calling SemaphoreCreateEx(). The initial count of the Semaphore must be specified when calling create, in 
+              many usages the count will begin at zero but any value required by the application can be specified.
+
+              Wait/Signal
+
+              Threads consume the available count (or wait for count to be available) by calling SemaphoreWait() or SemaphoreWaitEx() if
+              a timeout value is required.
+
+              Threads (or interrupt handlers) signal available count by calling SemaphoreSignal() or SemaphoreSignalEx() which allows
+              increasing the count by values greater than one.
+
+              Lock Hierarchy:
+              ---------------
+              Similar rules apply to all other serialized objects except that Semaphores support passing the flag SEMAPHORE_FLAG_IRQ (or FIQ)
+              to SemaphoreCreateEx() so that signalling via the SemaphoreSignal() functions may be called from an interrupt handler.
+
+
   Synchronizer - A reader/writer lock for serializing multiple concurrent reads and single writes to data. Threads are placed on a wait list while waiting to acquire the lock.
                  Recursive (reader lock can be acquired multiple times by the same thread or by other threads / writer lock can be acquired multiple times by the same thread)
                  Not suitable for use by Interrupt handlers.
                  Suitable for use on multiprocessor systems.
                  Recommended for long held operations or holding during I/O operations.
                  Access is serialized, the next thread to obtain the lock when it is released will be the thread that has been waiting longest (See also stolen wakeups below).
-                 
-                 Usage: 
+
+                 Usage:
                  ------
-              
+
                  Create/Destroy
-             
-                 //To Do
- 
-  Condition - A condition variable for coordinating synchronized access to resources by multiple threads. Condition variables are similar in concept to both Semaphores and Events
-              but do not retain any internal state information so threads always wait until they are woken or the specified timeout interval expires.
+
+                 Synchronizers are created using SynchronizerCreate() or SynchronizerCreateEx() and destroyed using SynchronizerDestroy().
+
+                 Lock/Unlock
+
+                 Threads wanting read access to the protected data call SynchronizerReaderLock() and SynchronizerReaderUnlock() to obtain and release
+                 the lock. While one or more threads holds the reader lock no thread can obtain the writer lock.
+
+                 A thread holding the reader lock can convert it to the writer lock by calling SynchronizerReaderConvert() but if any other thread is
+                 also holding the reader lock it will be placed in a wait list to wait until all threads have released the reader lock.
+
+                 Threads wanting write access to the protected data call SynchronizerWriterLock() and SynchronizerWriterUnlock() to obtain and release
+                 the lock. While any thread holds the writer lock no thread can obtain the reader lock.
+
+                 A thread holding the writer lock can convert it to the reader lock by calling SynchronizerWriterConvert(), because the writer lock is
+                 exclusive the thread will always obtain the reader lock immediately. All other threads currently waiting for the reader lock will also
+                 be released and given access.
+
+                 Extended versions of the lock and convert functions for both reader and writer locks are available which allow specifying a timeout
+                 value to give up waiting after a specified time.
+
+                 Lock Hierarchy:
+                 ---------------
+                 The rules for Synchronizers are the same as those that apply to other serialized objects such as CriticalSection.
+
+
+  Condition - A condition variable is used for coordinating synchronized access to resources by multiple threads. Condition variables are similar in concept to
+              both Semaphores and Events but do not retain any internal state information so threads always wait until they are woken or the specified timeout
+              interval expires.
               Not suitable for use by Interrupt handlers.
               Suitable for use on multiprocessor systems.
               Access is serialized, the next thread released when a condition is woken will be the thread that has been waiting longest (See also stolen wakeups below).
               
-              Usage: 
+              Usage:
               ------
               
               Create/Destroy
              
-              //To Do
+              Conditions are created using ConditionCreate() and destroyed using ConditionDestroy().
               
-  Completion - A completion is similar in concept to both condition variables and events but behaves differently to each of them. Completions are designed to be similar to the Linux
-               synchronization object of the same name and provide a light weight mechanism for allowing one or more threads to wait for a signal that they can proceed. The 
-               completion differs from a condition variable because it maintains an internal state, once the state has been set (complete) threads pass through the completion 
+              Wait/Wake
+
+              Threads call ConditionWait() to begin waiting for the condition to be woken, additional versions of wait exist that allow releasing
+              another lock before waiting and reacquiring it when the thread is woken after waiting.
+
+              These are ConditionWaitMutex(), ConditionWaitSynchronizer(), ConditionWaitCriticalSection() which apply to Mutex, Synchronizer and 
+              CriticalSection objects respectively.
+
+              Calling ConditionWake() will release one thread that is currently waiting for the condition, the ConditionWakeAll() function will
+              release all threads waiting for the condition.
+
+              Lock Hierarchy:
+              ---------------
+              The rules for Conditions are the same as those that apply to other serialized objects such as CriticalSection and Synchronizers.
+
+
+  Completion - A completion is similar in concept to both condition variables and events but behaves differently to each of them. Completions are designed to be similar to the
+               Linux synchronization object of the same name and provide a light weight mechanism for allowing one or more threads to wait for a signal that they can proceed.
+               The completion differs from a condition variable because it maintains an internal state, once the state has been set (complete) threads pass through the completion
                without waiting (until the state is reset). This is similar to an event (see below) but in the case of a completion the state remains set indefinitely or until
                reset is called, a completion also allows explicitly releasing one thread at a time or all threads at once. More generally the event was created to model a
                behaviour that is similar to the same object in Windows and the completion models the Linux object instead.
-               
+
                Completions can use a counted state rather than a single state if they are created with COMPLETION_FLAG_COUNTED, this is to mimic the implementation of the
                Linux variation however there is a slight but important change in the way counted completions are implemented in Ultibo. The Linux completion sets the count
-               to UMAX_INT / 2 on complete_all() which is documented as "effectively infinite". This is of course incorrect and seriously flawed because the count value is 
+               to UMAX_INT / 2 on complete_all() which is documented as "effectively infinite". This is of course incorrect and seriously flawed because the count value is
                only set to a little over 2 billion, a long running application could easily consume this count with calls to wait_for_completion() and then the application 
                would potentially fail without explanation.
-               
+
                To prevent this same fatal flaw the Ultibo implementation sets the count at LongWord(-1) on CompletionCompleteAll() and all other operations check for this
                value before incrementing or decrementing the count further. In this way the setting of complete all is genuinely infinite and will not fail on a long running
                application.
-  
-               Suitable for use by Interrupt handlers to call complete only if created with COMPLETION_FLAG_IRQ or FIQ (Interrupt handlers must not call wait).
+
+               Suitable for use by Interrupt handlers to call complete or reset only if created with COMPLETION_FLAG_IRQ or FIQ (Interrupt handlers must not call wait).
                Suitable for use on multiprocessor systems.
                Access is serialized, the next thread released when a completion is set will be the thread that has been waiting longest (See also stolen wakeups below).
-  
-               Usage: 
+
+               Usage:
                ------
-              
+
                Create/Destroy
-             
-               //To Do
-  
+
+               Completions are created using CompletionCreate() and destroyed using CompletionDestroy().
+
+               Wait/Reset/Complete
+
+               Threads call CompletionWait() to either wait for a completion to be set or proceed immediately if it is already set, for counted completions the
+               count is decremented (if not -1) and if the count reaches 0 the state of the completion is reset. A CompletionTryWait() function is available to
+               check the state and return immediately with an error if not set.
+
+               Threads (or interrupt handlers) set or reset the state of the completion by calling CompletionComplete(), CompletionReset() or CompletionCompleteAll().
+               See the header of each function for a detailed description of the behaviour in all applicable cases.
+
+               Lock Hierarchy:
+               ---------------
+               The rules for Completions are the same as those that apply to other serialized objects such as CriticalSection and Synchronizers except that
+               like Semaphores they may be signalled by interrupt handlers if the appropriate flags as passed to create. 
+
+
  Thread Handling
  ---------------
-  
-  List - //To Do
-  
-  Queue - //To Do
-  
-  Message - //To Do
-            Suitable for use by Interrupt handlers for sending (Interrupt handlers must not call receive).
-            Suitable for use on multiprocessor systems.
-            
-  Thread - //To Do
- 
- 
+
+  List - A linked list designed to provide the wait list functionality for threads, each thread record includes a list element and the list elements include a
+         thread handle to allow resolution in both directions. Lists are used by all serialized objects to hold threads in an ordered wait list that can be
+         safely manipulated in all scheduling states.
+         Lists are primarily intended to be used internally but are available for use by applications for appropriate cases.
+         Suitable for use by Interrupt handlers if created with appropriate flags.
+         Suitable for use on multiprocessor systems.
+
+         Usage:
+         ------
+
+         Create/Destroy
+
+         Lists are created using ListCreate() or ListCreateEx() and destroyed using ListDestroy().
+
+         Add/Get/Insert/Remove
+
+         A complete set of functions exist for adding, removing and inserting elements into a list and for finding threads within a list.
+         See the header of each of the functions in the appropriate section below for more information.
+
+         Lock/Unlock
+
+         A pair of universal lock and unlock functions exist to acquire and release list locks with the appropriate IRQ (or FIQ) handling for the flags the list
+         was created with. See ListLock() and ListUnlock() below for more information.
+
+
+  Queue - An ordered linked list designed to provide scheduler queues for threads, each thread record includes a queue element and the queue elements include a
+          thread handle to allow resolution in both directions.
+          Queues are primarily intended to be used internally but are available for use by applications for appropriate cases.
+          Suitable for use by Interrupt handlers if created with appropriate flags.
+          Suitable for use on multiprocessor systems.
+
+          Usage:
+          ------
+
+          Create/Destroy
+
+          Queues are created using QueueCreate() or QueueCreateEx() and destroyed using QueueDestroy().
+
+          Enqueue/Dequeue/Insert/Delete/Increment/Decrement
+
+          A range of functions exist for adding, removing and inserting elements into a queue and for managing the elements within a queue.
+          See the header of each of the functions in the appropriate section below for more information.
+
+          Lock/Unlock
+
+          A pair of universal lock and unlock functions exist to acquire and release queue locks with the appropriate IRQ (or FIQ) handling for the flags the
+          queue was created with. See QueueLock() and QueueUnlock() below for more information.
+
+
+  Message - A simple record similar to the Windows MSG structure the TMessage contains fields whose purpose is opaque to the core of Ultibo and can be used
+            for passing any type of information between threads or through other mechanisms.
+            No functions explicity exist to deal with messages, however they are used as the format for thread messages and are the record that is
+            passed to ThreadSendMessage() and received from ThreadReceiveMessage(). Messages are also used as the record format for Messageslots (see below).
+
+
+  Thread - Threads form the primary unit of code execution in Ultibo. It is not possible to create processes which run in their own protected address space,
+           all threads run within the kernel and with full privilege so they can perform any operation required. The core of Ultibo always includes
+           threading and multiple threads are created during the boot process to perform system critical functions.
+
+           The complete set of available thread functions are listed below and the header of each one includes more information including any
+           important notes or restrictions to be aware of.
+
+
  Additional Items
  ----------------
-  
-  Messageslot - //To Do
-                Suitable for use by Interrupt handlers for sending only if with created MESSAGESLOT_FLAG_IRQ or FIQ (Interrupt handlers must not call receive).
+
+  Messageslot - The Messageslot allows multiple threads to wait on a single object for messages received from other sources. Where the thread message functions
+                such as ThreadReceiveMessage() only allow a single thread to receive the message many threads can wait simultaneously on a Messageslot and will
+                be woken in turn as new messages are received.
+                Suitable for use by Interrupt handlers for sending only if created with MESSAGESLOT_FLAG_IRQ or FIQ (Interrupt handlers must not call receive).
                 Suitable for use on multiprocessor systems.
-  
-  Mailslot - //To Do
-             Unlike a messageslot where the sender will not wait if there is no space available to send, in a mailslot both the sender and receiver will
-             wait for either available space or received messages.
-             
+
+                Usage:
+                ------
+
+                Create/Destroy
+
+                Messageslots are created using MessageslotCreate() or MessageslotCreateEx() and destroyed using MessageslotDestroy().
+
+                Send/Receive
+
+                Threads wait for messages by calling MessageslotReceive() or MessageslotReceiveEx() to wait with a timeout.
+
+                Messages are sent using MessageslotSend() if the Messageslot is full and no more messages can be queued then an error
+                will be returned instead of waiting for more space to be available.
+
+
+  Mailslot - The Mailslot is similar to the Messageslot above and allows multiple threads to wait for messages to be received. Unlike a Messageslot where the
+             sender will not wait if there is no space available to send, in a mailslot both the sender and receiver will wait for either available space
+             or received messages. Mailslot messages are also an arbitrary pointer which means practically anything can be sent as long as the content is
+             recognized by both the sender and receiver.
              Not suitable for use by Interrupt handlers.
              Suitable for use on multiprocessor systems.
-     
-  Buffer - //To Do
+
+             Usage:
+             ------
+
+             Create/Destroy
+
+             Mailslots are created using MailslotCreate() and destroyed using MailslotDestroy().
+
+             Send/Receive
+
+             Threads wait for messages by calling MailslotReceive() or MailslotReceiveEx() to wait with a timeout.
+
+             Messages are sent using MailslotSend() or MailslotSendEx(), if the Mailslot is full and no more messages can be queued the sender will wait
+             until more space becomes available.
+
+
+  Buffer - A circular list which can hold blocks of memory, allocated records or any other type of pointer that needs to be acquired, used and later
+           released as part of a data transfer or queuing mechanism. Buffers simply contain pointers so their content is completely up to the user to
+           determine, the number of entries and the size of each entry must be specified when creating a Buffer.
            Not suitable for use by Interrupt handlers.
            Suitable for use on multiprocessor systems.
-  
-  Event - //To Do
-          Not suitable for use by Interrupt handlers.
-          Suitable for use on multiprocessor systems.
- 
-  Timer - //To Do
+
+           Usage:
+           ------
+
+           Create/Destroy
+
+           Buffers are created using BufferCreate() or BufferCreateEx() and destroyed using BufferDestroy().
+
+           Get/Free
+
+           The next available buffer entry is obtained by calling BufferGet() or BufferGetEx() to specify a timeout.
+           When the buffer is no longer required it can be returned to the list by calling BufferFree() and will be made available again.
+
+           During initialization of the Buffer all entries can be enumerated (in order to set initial values etc) by calling BufferIterate()
+           however once the Buffer is in operation (and any entries have been obtained) it is not valid to call iterate again.
+
+
+  Event - Events are a serialization object modelled on the Windows object of the same name, they can be set to allow threads to pass through
+          or reset to force threads to wait. Events can also be pulsed to allow a only single waiting thread to pass.
           Not suitable for use by Interrupt handlers.
           Suitable for use on multiprocessor systems.
 
-  Worker - //To Do
-           Not suitable for use by Interrupt handlers unless the WorkerSchedulerIRQ or WorkerSchedulerFIQ functions are used.
+          Usage:
+          ------
+
+          Create/Destroy
+
+          Events are created using EventCreate() or EventCreateEx() and destroyed using EventDestroy().
+
+          Wait/Set/Reset/Pulse
+
+          Threads call EventWait() to either wait for the Event to be set or pass through immediately if already set.
+
+          Calling EventSet(), EventReset() or EventPulse() changes the state of the Event and either allows threads to pass
+          or require them to wait depending on the values defined when the Event was created.
+
+          See the description in the header of each function below for detailed information about the behaviour in each state.
+
+
+  Timer - Timers provide a mechanism to request that a thread from the timer pool perform a specified function call in a certain number
+          of milliseconds from the time the request was made. This can be a convenient way to retry an operation after a predetermined
+          amount of time or to delay an operation until a certain amount of time has passed. Timers can be created as once off or 
+          recurring and can pass a supplied pointer to the called function.
+          Not suitable for use by Interrupt handlers.
+          Suitable for use on multiprocessor systems.
+
+          Usage:
+          ------
+
+          Create/Destroy
+
+          Timers are created using TimerCreate() or TimerCreateEx() and destroyed using TimerDestroy().
+
+          Enable/Disable
+
+          Timers can be enabled or disabled using the TimerEnable() and TimerDisable() functions, calling TimerEnableEx() allows
+          redefining some of the parameters specified during the call to TimerCreate() so an existing Timer can be reused for
+          multiple purposes.
+
+
+  Worker - The Worker thread pool provides a resource that can be used by system tasks and by applications as a convenient
+           and reliable way to allocate work to other threads for asynchronous completion. The number of threads in the Worker
+           pool can be dynamically increased or decreased to handle varying workloads. Using Worker threads to offload tasks
+           can greatly simplify application design but does require attention be given to thread safety of data that is passed
+           to Worker threads.
+           Not suitable for use by Interrupt handlers unless the WorkerScheduleIRQ or WorkerScheduleFIQ functions are used.
            Suitable for use on multiprocessor systems.
-           
-           Usage: 
+
+           Usage:
            ------
-           
+
+           Schedule/Cancel
+
+           A task can be scheduled to a Worker thread by calling WorkerSchedule() or WorkerScheduleEx() depending on the parameters
+           that need to be supplied. An already scheduled task can be cancelled by calling WorkerCancel() up until the point where
+           the task is assigned to a Worker thread.
+
            IRQ and FIQ Usage:
            ------------------
-           
-           WorkerScheduleIRQ and WorkerScheduleFIQ are designed to allow calling from interrupt handlers (IRQ or FIQ) and provide
+
+           WorkerScheduleIRQ() and WorkerScheduleFIQ() are designed to allow calling from interrupt handlers (IRQ or FIQ) and provide
            deadlock prevention mechanisms.
-           
-           WorkerScheduleIRQ relies on the fact the scheduler will either be bound to an IRQ or an FIQ, in either case IRQ is disabled
+
+           WorkerScheduleIRQ() relies on the fact the scheduler will either be bound to an IRQ or an FIQ, in either case IRQ is disabled
            while the scheduler is active and in any calls with queue, list and thread locks that check for the scheduler assignment.
            This means that an IRQ cannot occur when the scheduler is active or while it is blocked by a lock, calls to this function
            from a IRQ interrupt handler cannot deadlock.
-           
-           WorkerScheduleFIQ checks for the assignment of the scheduler, if the scheduler is bound to an FIQ then it proceeds as per
+
+           WorkerScheduleFIQ() checks for the assignment of the scheduler, if the scheduler is bound to an FIQ then it proceeds as per
            the IRQ version because the FIQ cannot occur when the scheduler is active or while it is blocked by a lock. If the scheduler
-           if bound to an IRQ then this function reverts to using the Tasker instead to transfer FIQ operations to an IRQ handler.
-           
+           is bound to an IRQ then this function reverts to using the Tasker instead to transfer FIQ operations to an IRQ handler.
+
            Both functions only support immediate scheduling of a one time task, delayed or repeating tasks cannot be scheduled.
-           
+
            It is safe to call either function from non interrupt code in order to allow shared code paths etc, however frequent calls
            to these functions from normal code can affect interrupt latency.
-  
+
+
   Tasker - The Tasker is a mechanism for transferring work from a fast interrupt (FIQ) handler to an interrupt (IRQ) handler in order
            to allow access to certain operations which could otherwise deadlock. When the scheduler is bound to an IRQ then all queue,
            list and thread locks disable IRQ in order to prevent preemption by the scheduler, when IRQ is disabled then FIQ is still
@@ -255,35 +523,57 @@ Threads
 
            In normal operation the clock interrupt is used to service the tasker list however it is board specific and could be 
            assigned to either a different interrupt or a dedicated interrupt if required.           
-           
-           //To Do 
-           
+
            Suitable for use by Fast Interrupt handlers and Interrupt handlers (Not required for Interrupt handlers).
            Suitable for use on multiprocessor systems.
-  
- Handles: ThreadManager
-          Thread Creation
-          Thread Termination
-          Thread Functions (Sleep/Kill/Suspend/Resume etc)
-          Semaphores / Critical Sections
-          IRQ Thread (Boot process becomes the IRQ or FIQ Thread)
-          FIQ Thread
-          Idle Thread (An always ready thread which measures utilization)
-          Main Thread (Main thread executes PASCALMAIN)
 
- Stolen wakeups: Locking and synchronization types such as CriticalSection, Semaphore, Condition, Event, Messageslot and Mailslot use a 
-                 wait queue internally to determine which thread has been waiting the longest. When a thread is removed from the wait
-                 queue so it can obtain the lock, semaphore, event etc there is a small window where the lock, semaphore or event may
-                 be acquired by another thread before the thread that was just woken from the wait queue. This is called a stolen wakeup
-                 and can happen in many systems including Windows and Linux, in some systems the caller is expected to check the state
-                 of a predicate value on return in order to detect a stolen wakeup. In Ultibo the code within the lock, semaphore, event
-                 etc functions automatically checks for a stolen wakeup and takes appropriate action to either return the thread to the
-                 wait queue or return with a timeout (where appropriate) so that the caller can respond accordingly.
-                 
-                 In no case will a call to a locking or synchronization function fail due to a stolen wakeup, the worst case scenario is
-                 that a thread may wait longer than it should have (ie it is returned to the back of the queue) or it may return with a
-                 timeout before the specified timeout value has expired.
- 
+           Usage:
+           ------
+
+           There are currently five Tasker functions available, TaskerThreadSendMessage(), TaskerMessageslotSend(), 
+           TaskerSemaphoreSignal(), TaskerCompletionReset() and TaskerCompletionComplete() which each perform the same function
+           as their non Tasker equivalent.
+
+           The Tasker list is checked on each clock interrupt for tasks waiting to be triggered, the task is performed
+           directly by the clock interrupt so the delay between request and trigger is no more than one clock interrupt
+           interval.
+
+
+ Services
+ --------
+
+  In addition to the various synchronization and serialization objects described above the following services are provided
+  by this unit:
+
+   ThreadManager
+   Thread Creation and Stack allocation
+   Thread Termination, Stack deallocation and cleanup
+   Thread Functions (Sleep/Kill/Suspend/Resume etc)
+   IRQ Thread (Boot process becomes the IRQ or FIQ Thread)
+   FIQ Thread
+   Idle Thread (An always ready thread which measures utilization)
+   Main Thread (Main thread executes PASCALMAIN)
+   Timer Threads (Pool of threads to service Timer requests)
+   Worker Threads (Pool of threads to service Worker requests)
+   Thread Scheduling, Allocation, Priority, Affinity and Migration
+
+
+ Stolen wakeups
+ --------------
+
+  Locking and synchronization types such as CriticalSection, Semaphore, Condition, Event, Messageslot and Mailslot use a
+  wait queue internally to determine which thread has been waiting the longest. When a thread is removed from the wait
+  queue so it can obtain the lock, semaphore, event etc there is a small window where the lock, semaphore or event may
+  be acquired by another thread before the thread that was just woken from the wait queue. This is called a stolen wakeup
+  and can happen in many systems including Windows and Linux, in some systems the caller is expected to check the state
+  of a predicate value on return in order to detect a stolen wakeup. In Ultibo the code within the lock, semaphore, event
+  etc functions automatically checks for a stolen wakeup and takes appropriate action to either return the thread to the
+  wait queue or return with a timeout (where appropriate) so that the caller can respond accordingly.
+
+  In no case will a call to a locking or synchronization function fail due to a stolen wakeup, the worst case scenario is
+  that a thread may wait longer than it should have (ie it is returned to the back of the queue) or it may return with a
+  timeout before the specified timeout value has expired.
+
 }
               
 {$mode delphi} {Default to Delphi compatible syntax}
@@ -500,7 +790,7 @@ const
  THREAD_PRIORITY_TIME_CRITICAL = THREAD_PRIORITY_CRITICAL;
  
  {Thread name constants}
- THREAD_NAME_LENGTH = 256;       {Length of thread name}
+ THREAD_NAME_LENGTH = SIZE_64;   {Length of thread name}
  
  IRQ_THREAD_NAME             = 'IRQ';
  FIQ_THREAD_NAME             = 'FIQ';
@@ -607,9 +897,11 @@ const
  WORKER_FLAG_EXCLUDED_FIQ = WORKER_FLAG_RESCHEDULE or WORKER_FLAG_IMMEDIATE; {Excluded flags}
  
  {Tasker task constants}
- TASKER_TASK_THREADSENDMESSAGE = 1;  {Perform a ThreadSendMessage() function using the tasker list}
- TASKER_TASK_MESSAGESLOTSEND   = 2;  {Perform a MessageslotSend() function using the tasker list}
- TASKER_TASK_SEMAPHORESIGNAL   = 3;  {Perform a SemaphoreSignal() function using the tasker list}
+ TASKER_TASK_THREADSENDMESSAGE  = 1;  {Perform a ThreadSendMessage() function using the tasker list}
+ TASKER_TASK_MESSAGESLOTSEND    = 2;  {Perform a MessageslotSend() function using the tasker list}
+ TASKER_TASK_SEMAPHORESIGNAL    = 3;  {Perform a SemaphoreSignal() function using the tasker list}
+ TASKER_TASK_COMPLETIONRESET    = 4;  {Perform a CompletionReset() function using the tasker list}
+ TASKER_TASK_COMPLETIONCOMPLETE = 5;  {Perform a CompletionComplete() or CompletionCompleteAll() function using the tasker list}
  
  {Scheduler migration constants}
  SCHEDULER_MIGRATION_DISABLED = 0;
@@ -1163,7 +1455,28 @@ type
   Semaphore:TSemaphoreHandle; {Handle of the semaphore to signal}
   Count:LongWord;             {The count to be signalled}
  end;
- 
+
+ {Tasker CompletionReset task}
+ PTaskerCompletionReset = ^TTaskerCompletionReset;
+ TTaskerCompletionReset = record
+  Task:LongWord;                {The task to be performed}
+  Prev:PTaskerTask;             {Previous task in Tasker list}
+  Next:PTaskerTask;             {Next task in Tasker list}
+  {Internal Properties}
+  Completion:TCompletionHandle; {Handle of the completion to reset}
+ end;
+
+ {Tasker CompletionComplete task}
+ PTaskerCompletionComplete = ^TTaskerCompletionComplete;
+ TTaskerCompletionComplete = record
+  Task:LongWord;                {The task to be performed}
+  Prev:PTaskerTask;             {Previous task in Tasker list}
+  Next:PTaskerTask;             {Next task in Tasker list}
+  {Internal Properties}
+  Completion:TCompletionHandle; {Handle of the completion to complete or complete all}
+  All:LongBool;                 {False for complete, True for complete all}
+ end;
+
 type
  {RTL Thread Manager Types}
  PThreadInfo = ^TThreadInfo;
@@ -1205,8 +1518,6 @@ type
  TSpinExchangeIRQ = function(Spin1,Spin2:PSpinEntry):LongWord;
  TSpinExchangeFIQ = function(Spin1,Spin2:PSpinEntry):LongWord;
 
- TSpinMaskExchange = function(Spin1,Spin2:PSpinEntry):LongWord; //To Do //Remove
- 
 type
  {Prototypes for Mutex Lock/Unlock/TryLock Handlers}
  TMutexLock = function(Mutex:PMutexEntry):LongWord;
@@ -1512,8 +1823,6 @@ var
  
  SpinExchangeIRQHandler:TSpinExchangeIRQ;
  SpinExchangeFIQHandler:TSpinExchangeFIQ;
- 
- SpinMaskExchangeHandler:TSpinMaskExchange; //To Do //Remove
  
 var
  {MutexLock/Unlock Handlers}
@@ -2053,6 +2362,8 @@ procedure WorkerTimer(WorkerRequest:PWorkerRequest);
 function TaskerThreadSendMessage(Thread:TThreadHandle;const Message:TMessage):LongWord;
 function TaskerMessageslotSend(Messageslot:TMessageslotHandle;const Message:TMessage):LongWord;
 function TaskerSemaphoreSignal(Semaphore:TSemaphoreHandle;Count:LongWord):LongWord;
+function TaskerCompletionReset(Completion:TCompletionHandle):LongWord;
+function TaskerCompletionComplete(Completion:TCompletionHandle;All:Boolean):LongWord;
 
 function TaskerEnqueue(Task:PTaskerTask):LongWord;
 function TaskerDequeue:PTaskerTask;
@@ -2094,6 +2405,8 @@ function SysWaitForThreadTerminate(ThreadHandle:TThreadID;TimeoutMs:LongInt):DWO
 function SysThreadSetPriority(ThreadHandle:TThreadID;Priority:LongInt):Boolean;      {-15..+15, 0=Normal}
 function SysThreadGetPriority(ThreadHandle:TThreadID):LongInt;
 function SysGetCurrentThreadId:TThreadID;
+procedure SysSetThreadDebugNameA(ThreadHandle:TThreadID;const ThreadName:AnsiString);
+procedure SysSetThreadDebugNameU(ThreadHandle:TThreadID;const ThreadName:UnicodeString);
 
 procedure SysInitCriticalSection(var CriticalSection);
 procedure SysDoneCriticalSection(var CriticalSection);
@@ -2110,7 +2423,11 @@ function SysBasicEventCreate(EventAttributes:Pointer;AManualReset,InitialState:B
 procedure SysBasicEventDestroy(State:PEventState);
 procedure SysBasicEventResetEvent(State:PEventState);
 procedure SysBasicEventSetEvent(State:PEventState);
+{$if defined(FPC_STABLE) or defined(FPC_FIXES) or defined(FPC_LEGACY)}
 function SysBasicEventWaitFor(Timeout:Cardinal;State:PEventState):LongInt;           {0=No Timeout}
+{$else}
+function SysBasicEventWaitFor(Timeout:Cardinal;State:PEventState;UseComWait:Boolean=False):LongInt;           {0=No Timeout}
+{$endif}
 
 function SysRTLEventCreate:PRTLEvent;
 procedure SysRTLEventDestroy(AEvent:PRTLEvent);
@@ -2126,27 +2443,27 @@ procedure SysSemaphoreWait(const Semaphore:Pointer);
 
 {==============================================================================}
 {Thread Helper Functions}
-function SpinGetCount:LongWord; inline;
+function SpinGetCount:LongWord;
 
-function MutexGetCount:LongWord; inline;
+function MutexGetCount:LongWord;
 
-function CriticalSectionGetCount:LongWord; inline;
+function CriticalSectionGetCount:LongWord;
 
-function SemaphoreGetCount:LongWord; inline;
+function SemaphoreGetCount:LongWord;
 
-function SynchronizerGetCount:LongWord; inline;
+function SynchronizerGetCount:LongWord;
 
-function ConditionGetCount:LongWord; inline;
+function ConditionGetCount:LongWord;
 
-function CompletionGetCount:LongWord; inline;
+function CompletionGetCount:LongWord;
 
-function ListGetCount:LongWord; inline;
+function ListGetCount:LongWord;
 
-function QueueGetCount:LongWord; inline;
+function QueueGetCount:LongWord;
 
-function ThreadGetCount:LongWord; inline;
+function ThreadGetCount:LongWord;
 
-function ThreadTlsGetCount:LongWord; inline;
+function ThreadTlsGetCount:LongWord;
 
 function ThreadAllocateStack(StackSize:LongWord):Pointer;
 procedure ThreadReleaseStack(StackBase:Pointer;StackSize:LongWord);
@@ -2155,20 +2472,20 @@ function ThreadSetupStack(StackBase:Pointer;StartProc:TThreadStart;ReturnProc:TT
 function ThreadSnapshotCreate:PThreadSnapshot;
 function ThreadSnapshotDestroy(ASnapshot:PThreadSnapshot):LongWord;
 
-function MessageslotGetCount:LongWord; inline;
+function MessageslotGetCount:LongWord;
 
-function MailslotGetCount:LongWord; inline;
+function MailslotGetCount:LongWord;
 
-function BufferGetCount:LongWord; inline;
+function BufferGetCount:LongWord;
 
-function EventGetCount:LongWord; inline;
+function EventGetCount:LongWord;
 
-function TimerGetCount:LongWord; inline;
+function TimerGetCount:LongWord;
 
-function WorkerGetCount:LongWord; inline;
-function WorkerGetPriorityCount:LongWord; inline;
+function WorkerGetCount:LongWord;
+function WorkerGetPriorityCount:LongWord;
 
-function TaskerGetCount:LongWord; inline;
+function TaskerGetCount:LongWord;
 
 function ListTypeToString(ListType:LongWord):String;
 function QueueTypeToString(QueueType:LongWord):String;
@@ -2236,6 +2553,10 @@ const
   ThreadSetPriority:@SysThreadSetPriority;
   ThreadGetPriority:@SysThreadGetPriority;
   GetCurrentThreadId:@SysGetCurrentThreadId;
+  {$IFNDEF FPC_LEGACY}
+  SetThreadDebugNameA:@SysSetThreadDebugNameA;
+  SetThreadDebugNameU:@SysSetThreadDebugNameU;
+  {$ENDIF}
   InitCriticalSection:@SysInitCriticalSection;
   DoneCriticalSection:@SysDoneCriticalSection;
   EnterCriticalSection:@SysEnterCriticalSection;
@@ -2256,10 +2577,12 @@ const
   RTLEventResetEvent:@SysRTLEventResetEvent;
   RTLEventWaitFor:@SysRTLEventWaitFor;
   RTLEventWaitForTimeout:@SysRTLEventWaitForTimeout;
-  SemaphoreInit:@SysSemaphoreInit;
-  SemaphoreDestroy:@SysSemaphoreDestroy;
-  SemaphorePost:@SysSemaphorePost;
-  SemaphoreWait:@SysSemaphoreWait;
+  {$IFDEF FPC_LEGACY}
+  SemaphoreInit:@SysSemaphoreInit; {Removed from current FPC RTL}
+  SemaphoreDestroy:@SysSemaphoreDestroy; {Removed from current FPC RTL}
+  SemaphorePost:@SysSemaphorePost; {Removed from current FPC RTL}
+  SemaphoreWait:@SysSemaphoreWait; {Removed from current FPC RTL}
+  {$ENDIF}
  );
  
 {==============================================================================}
@@ -2387,8 +2710,23 @@ function MutexTryLockDefault(MutexEntry:PMutexEntry):LongWord; forward;
 
 {==============================================================================}
 {==============================================================================}
+{Queue Forward Declarations}
+function QueueDequeueEx(Queue:TQueueHandle;Lock,Unlock:Boolean):TThreadHandle; forward;
+
+function QueueFirstKeyEx(Queue:TQueueHandle;Lock,Unlock:Boolean):Integer; forward;
+function QueueLastKeyEx(Queue:TQueueHandle;Lock,Unlock:Boolean):Integer; forward;
+
+{==============================================================================}
+{==============================================================================}
 {Thread Forward Declarations}
 procedure ThreadTimer(Data:Pointer); forward;
+
+{==============================================================================}
+{==============================================================================}
+{Timer Forward Declarations}
+function TimerDequeueEx(Lock,Unlock:Boolean):TTimerHandle; forward;
+
+function TimerFirstKeyEx(Lock,Unlock:Boolean):Integer; forward;
 
 {==============================================================================}
 {==============================================================================}
@@ -2625,7 +2963,7 @@ begin
      ThreadTable.Affinity:=(1 shl SCHEDULER_CPU_BOOT);   {Must always run on the Boot CPU}
      ThreadTable.StackBase:=Pointer(INITIAL_STACK_BASE); {Assign the Initial Stack to the Initial Thread (This is the stack we are currently running on)}
      ThreadTable.StackSize:=INITIAL_STACK_SIZE;          {Use the Initial Stack size not the FIQ Stack size}
-     StrLCopy(ThreadTable.Name,PChar(FIQ_THREAD_NAME + IntToStr(SCHEDULER_CPU_BOOT)),THREAD_NAME_LENGTH);
+     StrLCopy(ThreadTable.Name,PChar(FIQ_THREAD_NAME + IntToStr(SCHEDULER_CPU_BOOT)),THREAD_NAME_LENGTH - 1);
      ThreadTable.Lock:=SpinCreate;
      ThreadTable.Parent:=INVALID_HANDLE_VALUE;
      ThreadTable.Messages.Maximum:=THREAD_MESSAGES_MAXIMUM;
@@ -2676,7 +3014,7 @@ begin
      ThreadTable.Affinity:=(1 shl SCHEDULER_CPU_BOOT);   {Must always run on the Boot CPU}
      ThreadTable.StackBase:=Pointer(INITIAL_STACK_BASE); {Assign the Initial Stack to the Initial Thread (This is the stack we are currently running on)}
      ThreadTable.StackSize:=INITIAL_STACK_SIZE;          {Use the Initial Stack size not the IRQ Stack size}
-     StrLCopy(ThreadTable.Name,PChar(IRQ_THREAD_NAME + IntToStr(SCHEDULER_CPU_BOOT)),THREAD_NAME_LENGTH);
+     StrLCopy(ThreadTable.Name,PChar(IRQ_THREAD_NAME + IntToStr(SCHEDULER_CPU_BOOT)),THREAD_NAME_LENGTH - 1);
      ThreadTable.Lock:=SpinCreate;
      ThreadTable.Parent:=INVALID_HANDLE_VALUE;
      ThreadTable.Messages.Maximum:=THREAD_MESSAGES_MAXIMUM;
@@ -2823,6 +3161,11 @@ begin
  HandleTableLock.AcquireLock:=SpinLock;
  HandleTableLock.ReleaseLock:=SpinUnlock;
 
+ {Initialize Shutdown Table Lock}
+ ShutdownTableLock.Lock:=SpinCreate;
+ ShutdownTableLock.AcquireLock:=SpinLock;
+ ShutdownTableLock.ReleaseLock:=SpinUnlock;
+
  {Initialize Utility Lock}
  UtilityLock.Lock:=SpinCreate;
  UtilityLock.AcquireLock:=SpinLock;
@@ -2830,8 +3173,11 @@ begin
  
  {Initialize Shutdown Semaphore}
  ShutdownSemaphore.Semaphore:=SemaphoreCreate(0);
- ShutdownSemaphore.WaitSemaphore:=SemaphoreWait;
+ ShutdownSemaphore.WaitSemaphore:=SemaphoreWaitEx;
  ShutdownSemaphore.SignalSemaphore:=SemaphoreSignal;
+ 
+ {Initialize Shutdown Worker}
+ ShutdownWorker.ScheduleWorker:=WorkerSchedule;
  
  {Initialize CodePage Lock}
  CodePageLock.Lock:=MutexCreate;
@@ -3631,7 +3977,7 @@ begin
            ThreadEntry.Affinity:=(1 shl Count);                    {Must always run on the same Secondary CPU}
            ThreadEntry.StackBase:=Pointer(BOOT_STACK_BASE[Count]); {Assign the Boot Stack to the Boot Thread}
            ThreadEntry.StackSize:=BOOT_STACK_SIZE;                 {Use the Boot Stack size not the FIQ Stack size}
-           StrLCopy(ThreadEntry.Name,PChar(FIQ_THREAD_NAME + IntToStr(Count)),THREAD_NAME_LENGTH);
+           StrLCopy(ThreadEntry.Name,PChar(FIQ_THREAD_NAME + IntToStr(Count)),THREAD_NAME_LENGTH - 1);
            ThreadEntry.Lock:=SpinCreate;
            ThreadEntry.Parent:=INVALID_HANDLE_VALUE;
            ThreadEntry.Messages.Maximum:=THREAD_MESSAGES_MAXIMUM;
@@ -3705,7 +4051,7 @@ begin
            ThreadEntry.Affinity:=(1 shl Count);                    {Must always run on the same Secondary CPU}
            ThreadEntry.StackBase:=Pointer(BOOT_STACK_BASE[Count]); {Assign the Boot Stack to the Boot Thread}
            ThreadEntry.StackSize:=BOOT_STACK_SIZE;              {Use the Boot Stack size not the IRQ Stack size}
-           StrLCopy(ThreadEntry.Name,PChar(IRQ_THREAD_NAME + IntToStr(Count)),THREAD_NAME_LENGTH);
+           StrLCopy(ThreadEntry.Name,PChar(IRQ_THREAD_NAME + IntToStr(Count)),THREAD_NAME_LENGTH - 1);
            ThreadEntry.Lock:=SpinCreate;
            ThreadEntry.Parent:=INVALID_HANDLE_VALUE;
            ThreadEntry.Messages.Maximum:=THREAD_MESSAGES_MAXIMUM;
@@ -7190,10 +7536,13 @@ begin
           CriticalSectionEntry.Owner:=INVALID_HANDLE_VALUE;
           
           {Check List}
-          if ListNotEmpty(CriticalSectionEntry.List) then
+          while ListNotEmpty(CriticalSectionEntry.List) do
            begin
-            {Release thread waiting on CriticalSection}
-            CriticalSectionEntry.Release(CriticalSectionEntry.List);
+            {Release one thread waiting on CriticalSection}
+            if CriticalSectionEntry.Release(CriticalSectionEntry.List) = ERROR_SUCCESS then
+             begin
+              Break;
+             end; 
            end;
          end;
         
@@ -7986,14 +8335,20 @@ begin
            begin
             {Increment Semaphore}
             Inc(SemaphoreEntry.Count);
-           end; 
+           end;
+
+          {Decrement Count}
+          Dec(Count);
          end
         else
          begin
-          {Release thread waiting on Semaphore}
-          SemaphoreEntry.Release(SemaphoreEntry.List);
-         end;         
-        Dec(Count);
+          {Release one thread waiting on Semaphore}
+          if SemaphoreEntry.Release(SemaphoreEntry.List) = ERROR_SUCCESS then
+           begin
+            {Decrement Count}
+            Dec(Count);
+           end;
+         end;
        end;
  
       {Return Previous}
@@ -8649,10 +9004,13 @@ begin
         SynchronizerEntry.State:=SYNCHRONIZER_STATE_UNLOCKED;
         
         {Check Writer List}
-        if ListNotEmpty(SynchronizerEntry.WriterList) then
+        while ListNotEmpty(SynchronizerEntry.WriterList) do
          begin
           {Release one writer thread waiting on Synchronizer}
-          SynchronizerEntry.Release(SynchronizerEntry.WriterList);
+          if SynchronizerEntry.Release(SynchronizerEntry.WriterList) = ERROR_SUCCESS then
+           begin
+            Break;
+           end;
          end;
        end;
       
@@ -9318,10 +9676,13 @@ begin
           else
            begin
             {Check Writer List}
-            if ListNotEmpty(SynchronizerEntry.WriterList) then
+            while ListNotEmpty(SynchronizerEntry.WriterList) do
              begin
               {Release one writer thread waiting on Synchronizer}
-              SynchronizerEntry.Release(SynchronizerEntry.WriterList);
+              if SynchronizerEntry.Release(SynchronizerEntry.WriterList) = ERROR_SUCCESS then
+               begin
+                Break;
+               end;
              end;
            end;         
          end;
@@ -10297,10 +10658,13 @@ begin
       if ConditionEntry.Signature <> CONDITION_SIGNATURE then Exit;
  
       {Check List}
-      if ListNotEmpty(ConditionEntry.List) then
+      while ListNotEmpty(ConditionEntry.List) do
        begin
-        {Release thread waiting on Condition}
-        ConditionEntry.Release(ConditionEntry.List);
+        {Release one thread waiting on Condition}
+        if ConditionEntry.Release(ConditionEntry.List) = ERROR_SUCCESS then
+         begin
+          Break;
+         end;
        end; 
  
       {Return Result}
@@ -10373,7 +10737,7 @@ begin
       {Check List}
       while ListNotEmpty(ConditionEntry.List) do
        begin
-        {Release thread waiting on Condition}
+        {Release all threads waiting on Condition}
         ConditionEntry.Release(ConditionEntry.List);
        end;
  
@@ -11044,8 +11408,15 @@ begin
          end
         else
          begin        
-          {Release thread waiting on Completion}
-          CompletionEntry.Release(CompletionEntry.List);
+          {Check List}
+          while ListNotEmpty(CompletionEntry.List) do
+           begin
+            {Release one thread waiting on Completion}
+            if CompletionEntry.Release(CompletionEntry.List) = ERROR_SUCCESS then
+             begin
+              Break;
+             end;
+           end;
          end; 
        end
       else
@@ -11054,10 +11425,13 @@ begin
         if CompletionEntry.State = COMPLETION_STATE_RESET then
          begin
           {Check List}
-          if ListNotEmpty(CompletionEntry.List) then
+          while ListNotEmpty(CompletionEntry.List) do
            begin
-            {Release thread waiting on Completion}
-            CompletionEntry.Release(CompletionEntry.List);
+            {Release one thread waiting on Completion}
+            if CompletionEntry.Release(CompletionEntry.List) = ERROR_SUCCESS then
+             begin
+              Break;
+             end;
            end; 
          end; 
        end;       
@@ -11152,7 +11526,7 @@ begin
         {Check List}
         while ListNotEmpty(CompletionEntry.List) do
          begin
-          {Release thread waiting on Completion}
+          {Release all threads waiting on Completion}
           CompletionEntry.Release(CompletionEntry.List);
          end;
        end; 
@@ -12418,6 +12792,20 @@ function QueueDequeue(Queue:TQueueHandle):TThreadHandle;
 {Get and remove the first thread from the Queue}
 {Queue: Handle of Queue entry to get from}
 {Return: Handle of dequeued Thread or INVALID_HANDLE_VALUE on failure}
+begin
+ {}
+ Result:=QueueDequeueEx(Queue,True,True);
+end;
+
+{==============================================================================}
+
+function QueueDequeueEx(Queue:TQueueHandle;Lock,Unlock:Boolean):TThreadHandle;
+{Get and remove the first thread from the Queue}
+{Queue: Handle of Queue entry to get from}
+{Lock: Lock the Queue on entry if True}
+{Unlock: Unlock the Queue on exit if True}
+{Return: Handle of dequeued Thread or INVALID_HANDLE_VALUE on failure}
+{Note: Extended version used internally by the scheduler}
 var
  ThreadEntry:PThreadEntry;
  QueueEntry:PQueueEntry;
@@ -12435,7 +12823,7 @@ begin
  if QueueEntry.Signature <> QUEUE_SIGNATURE then Exit;
  
  {Lock the Queue}
- if QueueLock(Queue) = ERROR_SUCCESS then
+ if not(Lock) or (QueueLock(Queue) = ERROR_SUCCESS) then
   begin
    try
     {Check Signature}
@@ -12521,13 +12909,9 @@ begin
      end;
    finally
     {Unlock the Queue}
-    QueueUnlock(Queue);
+    if Unlock then QueueUnlock(Queue);
    end;   
-  end
- else
-  begin
-   {Nothing}
-  end;  
+  end;
 end;
 
 {==============================================================================}
@@ -12536,6 +12920,20 @@ function QueueFirstKey(Queue:TQueueHandle):Integer;
 {Get the first Key value from the Queue}
 {Queue: Handle of Queue entry to get from}
 {Return: First Key value from queue or QUEUE_KEY_NONE on failure}
+begin
+ {}
+ Result:=QueueFirstKeyEx(Queue,True,True);
+end;
+
+{==============================================================================}
+
+function QueueFirstKeyEx(Queue:TQueueHandle;Lock,Unlock:Boolean):Integer;
+{Get the first Key value from the Queue}
+{Queue: Handle of Queue entry to get from}
+{Lock: Lock the Queue on entry if True}
+{Unlock: Unlock the Queue on exit if True}
+{Return: First Key value from queue or QUEUE_KEY_NONE on failure}
+{Note: Extended version used internally by the scheduler}
 var
  QueueEntry:PQueueEntry;
  QueueElement:PQueueElement;
@@ -12552,7 +12950,7 @@ begin
  if QueueEntry.Signature <> QUEUE_SIGNATURE then Exit;
  
  {Lock the Queue}
- if QueueLock(Queue) = ERROR_SUCCESS then
+ if not(Lock) or (QueueLock(Queue) = ERROR_SUCCESS) then
   begin
    try
     {Check Signature}
@@ -12567,12 +12965,8 @@ begin
      end;
    finally
     {Unlock the Queue}
-    QueueUnlock(Queue);
+    if Unlock then QueueUnlock(Queue);
    end;   
-  end
- else
-  begin
-   {Nothing}
   end;
 end;
 
@@ -12582,6 +12976,20 @@ function QueueLastKey(Queue:TQueueHandle):Integer;
 {Get the last Key value from the Queue}
 {Queue: Handle of Queue entry to get from}
 {Return: Last Key value from queue or QUEUE_KEY_NONE on failure}
+begin
+ {}
+ Result:=QueueLastKeyEx(Queue,True,True);
+end;
+
+{==============================================================================}
+
+function QueueLastKeyEx(Queue:TQueueHandle;Lock,Unlock:Boolean):Integer;
+{Get the last Key value from the Queue}
+{Queue: Handle of Queue entry to get from}
+{Lock: Lock the Queue on entry if True}
+{Unlock: Unlock the Queue on exit if True}
+{Return: Last Key value from queue or QUEUE_KEY_NONE on failure}
+{Note: Extended version used internally by the scheduler}
 var
  QueueEntry:PQueueEntry;
  QueueElement:PQueueElement;
@@ -12598,7 +13006,7 @@ begin
  if QueueEntry.Signature <> QUEUE_SIGNATURE then Exit;
  
  {Lock the Queue}
- if QueueLock(Queue) = ERROR_SUCCESS then
+ if not(Lock) or (QueueLock(Queue) = ERROR_SUCCESS) then
   begin
    try
     {Check Signature}
@@ -12613,12 +13021,8 @@ begin
      end;
    finally
     {Unlock the Queue}
-    QueueUnlock(Queue);
+    if Unlock then QueueUnlock(Queue);
    end;   
-  end
- else
-  begin
-   {Nothing}
   end;
 end;
 
@@ -13367,7 +13771,7 @@ begin
  ThreadEntry.Affinity:=Affinity;
  ThreadEntry.StackBase:=StackBase;
  ThreadEntry.StackSize:=StackSize;
- StrLCopy(ThreadEntry.Name,Name,THREAD_NAME_LENGTH);
+ StrLCopy(ThreadEntry.Name,Name,THREAD_NAME_LENGTH - 1);
  ThreadEntry.Lock:=SpinCreate;
  ThreadEntry.Parent:=ThreadGetCurrent;
  ThreadEntry.Messages.Maximum:=THREAD_MESSAGES_MAXIMUM;
@@ -13796,7 +14200,7 @@ begin
  if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
 
  {Allocate Buffer}
- SetLength(WorkBuffer,THREAD_NAME_LENGTH);
+ SetLength(WorkBuffer,THREAD_NAME_LENGTH - 1);
  
  {Acquire the Lock}
  if SCHEDULER_FIQ_ENABLED then
@@ -13814,7 +14218,7 @@ begin
     if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
 
     {Copy to Buffer}
-    StrLCopy(PChar(WorkBuffer),ThreadEntry.Name,THREAD_NAME_LENGTH);
+    StrLCopy(PChar(WorkBuffer),ThreadEntry.Name,THREAD_NAME_LENGTH - 1);
     
     {Result must be returned outside lock}
    finally
@@ -13882,7 +14286,7 @@ begin
     if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
 
     {Set Name}
-    StrLCopy(ThreadEntry.Name,PChar(Name),THREAD_NAME_LENGTH);
+    StrLCopy(ThreadEntry.Name,PChar(Name),THREAD_NAME_LENGTH - 1);
     
     {Return Result}
     Result:=ERROR_SUCCESS;
@@ -14622,6 +15026,7 @@ begin
  {Return Result}
  Result:=ERROR_SUCCESS;
 end;
+
 {==============================================================================}
 
 function ThreadGetStackPointer(Thread:TThreadHandle):PtrUInt;
@@ -15377,6 +15782,8 @@ begin
     {Check Signature}
     if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
 
+    Result:=ERROR_OPERATION_FAILED;
+
     {Check State}
     if ThreadEntry.State = THREAD_STATE_TERMINATED then
      begin
@@ -15442,7 +15849,6 @@ begin
     
     {Enqueue Thread (Current CPU and Priority)}
     Result:=QueueEnqueue(SchedulerGetQueueHandleEx(ThreadEntry.CurrentCPU,ThreadEntry.Priority),Thread);
-    if Result <> ERROR_SUCCESS then Exit;
    finally
     {Release the Lock}
     if SCHEDULER_FIQ_ENABLED then
@@ -15506,6 +15912,8 @@ begin
     {Check Signature}
     if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
 
+    Result:=ERROR_OPERATION_FAILED;
+
     {Check State}
     if ThreadEntry.State = THREAD_STATE_TERMINATED then
      begin
@@ -15532,8 +15940,12 @@ begin
      begin
       {Set ReceiveResult}
       ThreadEntry.ReceiveResult:=WAIT_TIMEOUT;
+     end
+    else
+     begin
+      Exit;
      end;
-     
+
     {Set State}
     ThreadEntry.State:=THREAD_STATE_READY;
   
@@ -15589,7 +16001,6 @@ begin
      
     {Enqueue Thread (Current CPU and Priority)}
     Result:=QueueEnqueue(SchedulerGetQueueHandleEx(ThreadEntry.CurrentCPU,ThreadEntry.Priority),Thread);
-    if Result <> ERROR_SUCCESS then Exit;
    finally
     {Release the Lock}
     if SCHEDULER_FIQ_ENABLED then
@@ -15654,6 +16065,8 @@ begin
     {Check Signature}
     if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
 
+    Result:=ERROR_OPERATION_FAILED;
+
     {Check State}
     if ThreadEntry.State = THREAD_STATE_TERMINATED then
      begin
@@ -15710,6 +16123,10 @@ begin
       
       {Set ReceiveResult}
       ThreadEntry.ReceiveResult:=WAIT_TIMEOUT;
+     end
+    else
+     begin
+      Exit;
      end;
      
     {Set State}
@@ -15767,7 +16184,6 @@ begin
      
     {Enqueue Thread (Current CPU and Priority)}
     Result:=QueueEnqueue(SchedulerGetQueueHandleEx(ThreadEntry.CurrentCPU,ThreadEntry.Priority),Thread);
-    if Result <> ERROR_SUCCESS then Exit;
    finally
     {Release the Lock}
     if SCHEDULER_FIQ_ENABLED then
@@ -15862,6 +16278,8 @@ begin
    try
     {Check Signature}
     if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
+
+    Result:=ERROR_OPERATION_FAILED;
 
     {Check State}
     if ThreadEntry.State = THREAD_STATE_TERMINATED then
@@ -15961,6 +16379,8 @@ begin
    try
     {Check Signature}
     if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
+
+    Result:=ERROR_OPERATION_FAILED;
 
     {Check State}
     if ThreadEntry.State = THREAD_STATE_TERMINATED then
@@ -16138,7 +16558,9 @@ begin
      try
       {Check Signature}
       if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
-    
+
+      Result:=ERROR_OPERATION_FAILED;
+
       {Check State}
       if ThreadEntry.State = THREAD_STATE_TERMINATED then
        begin
@@ -16250,6 +16672,8 @@ begin
    try
     {Check Signature}
     if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
+
+    Result:=ERROR_OPERATION_FAILED;
 
     {Check State}
     if ThreadEntry.State = THREAD_STATE_TERMINATED then
@@ -16448,7 +16872,9 @@ begin
      try
       {Check Signature}
       if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
-      
+
+      Result:=ERROR_OPERATION_FAILED;
+
       {Check State}
       if ThreadEntry.State = THREAD_STATE_TERMINATED then
        begin
@@ -16479,8 +16905,12 @@ begin
       
         {Set WaitList}
         ThreadEntry.WaitList:=INVALID_HANDLE_VALUE;
+       end
+      else
+       begin
+        Exit;
        end;
-      
+
       {Set State}
       ThreadEntry.State:=THREAD_STATE_READY;
 
@@ -16536,7 +16966,6 @@ begin
        
       {Enqueue Thread (Current CPU and Priority)}
       Result:=QueueEnqueue(SchedulerGetQueueHandleEx(ThreadEntry.CurrentCPU,ThreadEntry.Priority),Thread);
-      if Result <> ERROR_SUCCESS then Exit;
      finally
       {Release the Lock}
       if SCHEDULER_FIQ_ENABLED then
@@ -16553,6 +16982,10 @@ begin
     begin
      Result:=ERROR_CAN_NOT_COMPLETE;
     end;  
+  end
+ else
+  begin
+   Result:=ERROR_NOT_FOUND;
   end;
 end;
 
@@ -16607,7 +17040,9 @@ begin
      try
       {Check Signature}
       if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
- 
+
+      Result:=ERROR_OPERATION_FAILED;
+
       {Check State}
       if ThreadEntry.State = THREAD_STATE_TERMINATED then
        begin
@@ -16638,8 +17073,12 @@ begin
       
         {Set WaitList}
         ThreadEntry.WaitList:=INVALID_HANDLE_VALUE;
+       end
+      else
+       begin
+        Exit;
        end;
-      
+
       {Set State}
       ThreadEntry.State:=THREAD_STATE_READY;
 
@@ -16695,7 +17134,6 @@ begin
   
       {Enqueue Thread (Current CPU and Priority)}
       Result:=QueueEnqueue(SchedulerGetQueueHandleEx(ThreadEntry.CurrentCPU,ThreadEntry.Priority),Thread);
-      if Result <> ERROR_SUCCESS then Exit;
      finally
       {Release the Lock}
       if SCHEDULER_FIQ_ENABLED then
@@ -16712,6 +17150,10 @@ begin
     begin
      Result:=ERROR_CAN_NOT_COMPLETE;
     end;  
+  end
+ else
+  begin
+   Result:=ERROR_NOT_FOUND;
   end;
 end;
 
@@ -16918,6 +17360,8 @@ begin
     {Check Signature}
     if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
 
+    Result:=ERROR_OPERATION_FAILED;
+
     {Check State}
     if (ThreadEntry.State <> THREAD_STATE_RUNNING) and (ThreadEntry.State <> THREAD_STATE_READY) then
      begin
@@ -17025,6 +17469,8 @@ begin
     {Check Signature}
     if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
 
+    Result:=ERROR_OPERATION_FAILED;
+
     {Check State}
     if ThreadEntry.State <> THREAD_STATE_SUSPENDED then
      begin
@@ -17086,7 +17532,6 @@ begin
   
     {Enqueue Thread (Current CPU and Priority)}
     Result:=QueueEnqueue(SchedulerGetQueueHandleEx(ThreadEntry.CurrentCPU,ThreadEntry.Priority),Thread);
-    if Result <> ERROR_SUCCESS then Exit;
    finally
     {Release the Lock}
     if SCHEDULER_FIQ_ENABLED then
@@ -17159,6 +17604,8 @@ begin
    try
     {Check Signature}
     if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
+
+    Result:=ERROR_OPERATION_FAILED;
 
     {Check State}
     if ThreadEntry.State = THREAD_STATE_TERMINATED then
@@ -17388,6 +17835,14 @@ begin
     {Check Signature}
     if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
 
+    Result:=ERROR_OPERATION_FAILED;
+
+    {Check State}
+    if ThreadEntry.State = THREAD_STATE_TERMINATED then
+     begin
+      Exit;
+     end;
+
     {Check Timeout}
     if Timeout = 0 then
      begin
@@ -17395,13 +17850,7 @@ begin
       Result:=ERROR_WAIT_TIMEOUT;
       if ThreadEntry.Messages.Count = 0 then Exit;
      end; 
-   
-    {Check State}
-    if ThreadEntry.State = THREAD_STATE_TERMINATED then
-     begin
-      Exit;
-     end;
-  
+
     {Check for Message}
     if ThreadEntry.Messages.Count > 0 then
      begin
@@ -17552,6 +18001,8 @@ begin
    try
     {Check Signature}
     if ThreadEntry.Signature <> THREAD_SIGNATURE then Exit;
+
+    Result:=ERROR_OPERATION_FAILED;
 
     {Check State}
     if ThreadEntry.State = THREAD_STATE_TERMINATED then
@@ -17801,15 +18252,17 @@ begin
  CurrentCPU:=CPUGetCurrent;
  
  {Check Terminated}
- while QueueFirstKey(SchedulerTerminationQueue[CurrentCPU]) <= 0 do
+ while QueueFirstKeyEx(SchedulerTerminationQueue[CurrentCPU],True,False) <= 0 do
   begin
    {$IFDEF SCHEDULER_DEBUG}
    Inc(SchedulerTerminationCounter[CurrentCPU]);
    {$ENDIF}
    
    {Destroy Thread}
-   ThreadDestroy(QueueDequeue(SchedulerTerminationQueue[CurrentCPU]));
+   ThreadDestroy(QueueDequeueEx(SchedulerTerminationQueue[CurrentCPU],False,True));
   end;
+ {Unlock Queue}
+ QueueUnlock(SchedulerTerminationQueue[CurrentCPU]);
 end;
 
 {==============================================================================}
@@ -17913,10 +18366,12 @@ begin
   begin 
    {Use the Default method}
    {Ready Threads}
-   while QueueFirstKey(SchedulerSleepQueue[CPUID]) <= 0 do
+   while QueueFirstKeyEx(SchedulerSleepQueue[CPUID],True,False) <= 0 do
     begin
-     ThreadReady(QueueDequeue(SchedulerSleepQueue[CPUID]),False);
+     ThreadReady(QueueDequeueEx(SchedulerSleepQueue[CPUID],False,True),False);
     end;
+   {Unlock Queue}
+   QueueUnlock(SchedulerSleepQueue[CPUID]);
  
    {Return Result}
    Result:=ERROR_SUCCESS;
@@ -17961,11 +18416,13 @@ begin
   begin 
    {Use the Default method}
    {Timeout Threads}
-   while QueueFirstKey(SchedulerTimeoutQueue[CPUID]) <= 0 do
+   while QueueFirstKeyEx(SchedulerTimeoutQueue[CPUID],True,False) <= 0 do
     begin
-     ThreadTimeout(QueueDequeue(SchedulerTimeoutQueue[CPUID]));
+     ThreadTimeout(QueueDequeueEx(SchedulerTimeoutQueue[CPUID],False,True));
     end;
- 
+   {Unlock Queue}
+   QueueUnlock(SchedulerTimeoutQueue[CPUID]);
+
    {Return Result}
    Result:=ERROR_SUCCESS;
   end; 
@@ -19278,10 +19735,13 @@ begin
       Inc(MessageslotEntry.Messages.Count);
  
       {Check List}
-      if ListNotEmpty(MessageslotEntry.List) then
+      while ListNotEmpty(MessageslotEntry.List) do
        begin
-        {Release thread waiting on Messageslot}
-        MessageslotEntry.Release(MessageslotEntry.List);
+        {Release one thread waiting on Messageslot}
+        if MessageslotEntry.Release(MessageslotEntry.List) = ERROR_SUCCESS then
+         begin
+          Break;
+         end;
        end;
      
       {Return Result}
@@ -20147,9 +20607,12 @@ begin
    BufferItem.Parent:=TBufferHandle(BufferEntry);
    BufferItem.Next:=PBufferItem(PtrUInt(BufferItem) + PtrUInt(BufferSize));
    BufferItem.Buffer:=Pointer(PtrUInt(BufferItem) + PtrUInt(SizeOf(TBufferItem)));
+
    {Get Next Item}
-   BufferItem:=BufferItem.Next;
+   if BufferCount < Count - 1 then BufferItem:=BufferItem.Next;
   end;
+ {Update Last Item}
+ BufferItem.Next:=nil;
  
  {Insert Buffer entry}
  if SpinLock(BufferTableLock) = ERROR_SUCCESS then
@@ -20647,6 +21110,7 @@ begin
           
           {Get Next}
           BufferItem:=PreviousItem.Next;
+          if BufferItem = nil then Exit;
   
           {Return Buffer}
           Result:=BufferItem.Buffer;
@@ -20902,7 +21366,7 @@ end;
 {==============================================================================}
 
 function EventWait(Event:TEventHandle):LongWord;
-{Wait on a existing Event entry
+{Wait on an existing Event entry
 
  If the Event is currently signaled then simply return immediately
  
@@ -20957,7 +21421,7 @@ end;
 {==============================================================================}
 
 function EventWaitEx(Event:TEventHandle;Timeout:LongWord):LongWord;
-{Wait on a existing Event entry
+{Wait on an existing Event entry
 
  If the Event is currently signaled then simply return immediately
  
@@ -21185,13 +21649,16 @@ begin
          begin
           {Auto Reset}
           {Check List}
-          if ListNotEmpty(EventEntry.List) then
+          while ListNotEmpty(EventEntry.List) do
            begin
-            {Release thread waiting on Event}
-            EventEntry.Release(EventEntry.List);
-           
-            {Reset State}
-            EventEntry.State:=EVENT_STATE_UNSIGNALED;
+            {Release one thread waiting on Event}
+            if EventEntry.Release(EventEntry.List) = ERROR_SUCCESS then
+             begin
+              {Reset State}
+              EventEntry.State:=EVENT_STATE_UNSIGNALED;
+              
+              Break;
+             end; 
            end;
          end
         else
@@ -21200,7 +21667,7 @@ begin
           {Check List}
           while ListNotEmpty(EventEntry.List) do
            begin
-            {Release thread waiting on Event}
+            {Release all threads waiting on Event}
             EventEntry.Release(EventEntry.List);
            end;
          end;
@@ -21375,10 +21842,13 @@ begin
          begin
           {Auto Reset}
           {Check List}
-          if ListNotEmpty(EventEntry.List) then
+          while ListNotEmpty(EventEntry.List) do
            begin
-            {Release thread waiting on Event}
-            EventEntry.Release(EventEntry.List);
+            {Release one thread waiting on Event}
+            if EventEntry.Release(EventEntry.List) = ERROR_SUCCESS then
+             begin
+              Break;
+             end;
            end;
          end
         else
@@ -21387,7 +21857,7 @@ begin
           {Check List}
           while ListNotEmpty(EventEntry.List) do
            begin
-            {Release thread waiting on Event}
+            {Release all threads waiting on Event}
             EventEntry.Release(EventEntry.List);
            end;
          end;         
@@ -21848,6 +22318,19 @@ end;
 function TimerDequeue:TTimerHandle;
 {Get and remove the first timer from the Timer list}
 {Return: Handle of dequeued Timer or INVALID_HANDLE_VALUE on failure}
+begin
+ {}
+ Result:=TimerDequeueEx(True,True);
+end;
+
+{==============================================================================}
+
+function TimerDequeueEx(Lock,Unlock:Boolean):TTimerHandle;
+{Get and remove the first timer from the Timer list}
+{Lock: Lock the Timer list on entry if True}
+{Unlock: Unlock the Timer list on exit if True}
+{Return: Handle of dequeued Timer or INVALID_HANDLE_VALUE on failure}
+{Note: Extended version used internally by the timer trigger}
 var
  ResultCode:LongWord;
  TimerItem:PTimerItem;
@@ -21860,22 +22343,29 @@ begin
  if TimerList = nil then Exit;
  
  {Lock the List}
- if (TimerList.Flags and LOCK_FLAG_IRQFIQ) <> 0 then
+ if Lock then
   begin
-   ResultCode:=SpinLockIRQFIQ(TimerList.Lock);
-  end
- else if (TimerList.Flags and LOCK_FLAG_FIQ) <> 0 then
-  begin
-   ResultCode:=SpinLockFIQ(TimerList.Lock);
-  end
- else if (TimerList.Flags and LOCK_FLAG_IRQ) <> 0 then
-  begin
-   ResultCode:=SpinLockIRQ(TimerList.Lock);
+   if (TimerList.Flags and LOCK_FLAG_IRQFIQ) <> 0 then
+    begin
+     ResultCode:=SpinLockIRQFIQ(TimerList.Lock);
+    end
+   else if (TimerList.Flags and LOCK_FLAG_FIQ) <> 0 then
+    begin
+     ResultCode:=SpinLockFIQ(TimerList.Lock);
+    end
+   else if (TimerList.Flags and LOCK_FLAG_IRQ) <> 0 then
+    begin
+     ResultCode:=SpinLockIRQ(TimerList.Lock);
+    end
+   else
+    begin
+     ResultCode:=SpinLock(TimerList.Lock);
+    end;
   end
  else
   begin
-   ResultCode:=SpinLock(TimerList.Lock);
-  end;    
+   ResultCode:=ERROR_SUCCESS;
+  end;
  if ResultCode = ERROR_SUCCESS then
   begin
    try
@@ -21917,21 +22407,24 @@ begin
      end;
    finally
     {Unlock the List}
-    if (TimerList.Flags and LOCK_FLAG_IRQFIQ) <> 0 then
+    if Unlock then
      begin
-      SpinUnlockIRQFIQ(TimerList.Lock);
-     end
-    else if (TimerList.Flags and LOCK_FLAG_FIQ) <> 0 then
-     begin
-      SpinUnlockFIQ(TimerList.Lock);
-     end
-    else if (TimerList.Flags and LOCK_FLAG_IRQ) <> 0 then
-     begin
-      SpinUnlockIRQ(TimerList.Lock);
-     end
-    else
-     begin
-      SpinUnlock(TimerList.Lock);
+      if (TimerList.Flags and LOCK_FLAG_IRQFIQ) <> 0 then
+       begin
+        SpinUnlockIRQFIQ(TimerList.Lock);
+       end
+      else if (TimerList.Flags and LOCK_FLAG_FIQ) <> 0 then
+       begin
+        SpinUnlockFIQ(TimerList.Lock);
+       end
+      else if (TimerList.Flags and LOCK_FLAG_IRQ) <> 0 then
+       begin
+        SpinUnlockIRQ(TimerList.Lock);
+       end
+      else
+       begin
+        SpinUnlock(TimerList.Lock);
+       end;
      end;
    end;   
   end
@@ -21946,6 +22439,19 @@ end;
 function TimerFirstKey:Integer;
 {Get the first Key value from the Timer list}
 {Return: First Key value from timer list or TIMER_KEY_NONE on failure}
+begin
+ {}
+ Result:=TimerFirstKeyEx(True,True);
+end;
+
+{==============================================================================}
+
+function TimerFirstKeyEx(Lock,Unlock:Boolean):Integer;
+{Get the first Key value from the Timer list}
+{Lock: Lock the Timer list on entry if True}
+{Unlock: Unlock the Timer list on exit if True}
+{Return: First Key value from timer list or TIMER_KEY_NONE on failure}
+{Note: Extended version used internally by the timer trigger}
 var
  ResultCode:LongWord;
  TimerItem:PTimerItem;
@@ -21957,22 +22463,29 @@ begin
  if TimerList = nil then Exit;
  
  {Lock the List}
- if (TimerList.Flags and LOCK_FLAG_IRQFIQ) <> 0 then
+ if Lock then
   begin
-   ResultCode:=SpinLockIRQFIQ(TimerList.Lock);
-  end
- else if (TimerList.Flags and LOCK_FLAG_FIQ) <> 0 then
-  begin
-   ResultCode:=SpinLockFIQ(TimerList.Lock);
-  end
- else if (TimerList.Flags and LOCK_FLAG_IRQ) <> 0 then
-  begin
-   ResultCode:=SpinLockIRQ(TimerList.Lock);
+   if (TimerList.Flags and LOCK_FLAG_IRQFIQ) <> 0 then
+    begin
+     ResultCode:=SpinLockIRQFIQ(TimerList.Lock);
+    end
+   else if (TimerList.Flags and LOCK_FLAG_FIQ) <> 0 then
+    begin
+     ResultCode:=SpinLockFIQ(TimerList.Lock);
+    end
+   else if (TimerList.Flags and LOCK_FLAG_IRQ) <> 0 then
+    begin
+     ResultCode:=SpinLockIRQ(TimerList.Lock);
+    end
+   else
+    begin
+     ResultCode:=SpinLock(TimerList.Lock);
+    end;
   end
  else
   begin
-   ResultCode:=SpinLock(TimerList.Lock);
-  end;    
+   ResultCode:=ERROR_SUCCESS;
+  end;
  if ResultCode = ERROR_SUCCESS then
   begin
    try
@@ -21985,21 +22498,24 @@ begin
      end;
    finally
     {Unlock the List}
-    if (TimerList.Flags and LOCK_FLAG_IRQFIQ) <> 0 then
+    if Unlock then
      begin
-      SpinUnlockIRQFIQ(TimerList.Lock);
-     end
-    else if (TimerList.Flags and LOCK_FLAG_FIQ) <> 0 then
-     begin
-      SpinUnlockFIQ(TimerList.Lock);
-     end
-    else if (TimerList.Flags and LOCK_FLAG_IRQ) <> 0 then
-     begin
-      SpinUnlockIRQ(TimerList.Lock);
-     end
-    else
-     begin
-      SpinUnlock(TimerList.Lock);
+      if (TimerList.Flags and LOCK_FLAG_IRQFIQ) <> 0 then
+       begin
+        SpinUnlockIRQFIQ(TimerList.Lock);
+       end
+      else if (TimerList.Flags and LOCK_FLAG_FIQ) <> 0 then
+       begin
+        SpinUnlockFIQ(TimerList.Lock);
+       end
+      else if (TimerList.Flags and LOCK_FLAG_IRQ) <> 0 then
+       begin
+        SpinUnlockIRQ(TimerList.Lock);
+       end
+      else
+       begin
+        SpinUnlock(TimerList.Lock);
+       end;
      end;
    end;   
   end
@@ -22547,10 +23063,10 @@ begin
    {Use the Default method}
    {Trigger Timers}
    FillChar(Message,SizeOf(TMessage),0);
-   while TimerFirstKey <= 0 do 
+   while TimerFirstKeyEx(True,False) <= 0 do 
     begin
      {Dequeue Timer}
-     Timer:=TimerDequeue;
+     Timer:=TimerDequeueEx(False,True);
      if Timer <> INVALID_HANDLE_VALUE then
       begin
        {Check the Timer}
@@ -22571,6 +23087,8 @@ begin
         end; 
       end; 
     end;
+   {Unlock List}
+   TimerFirstKeyEx(False,True);
  
    {Return Result}
    Result:=ERROR_SUCCESS;
@@ -23425,7 +23943,16 @@ var
 begin
  {}
  Result:=ERROR_INVALID_PARAMETER;
- 
+
+ {Check Scheduler}
+ if SCHEDULER_FIQ_ENABLED then
+  begin
+   {Can call ThreadSendMessage from FIQ if scheduler uses FIQ}
+   Result:=ThreadSendMessage(Thread,Message);
+
+   Exit;
+  end;
+
  {Check Thread}
  if Thread = INVALID_HANDLE_VALUE then Exit;
  
@@ -23464,7 +23991,16 @@ var
 begin
  {}
  Result:=ERROR_INVALID_PARAMETER;
- 
+
+ {Check Scheduler}
+ if SCHEDULER_FIQ_ENABLED then
+  begin
+   {Can call MessageslotSend from FIQ if scheduler uses FIQ}
+   Result:=MessageslotSend(Messageslot,Message);
+
+   Exit;
+  end;
+
  {Check Messageslot}
  if Messageslot = INVALID_HANDLE_VALUE then Exit;
  
@@ -23503,7 +24039,16 @@ var
 begin
  {}
  Result:=ERROR_INVALID_PARAMETER;
- 
+
+ {Check Scheduler}
+ if SCHEDULER_FIQ_ENABLED then
+  begin
+   {Can call SemaphoreSignal from FIQ if scheduler uses FIQ}
+   Result:=SemaphoreSignalEx(Semaphore,Count,nil);
+
+   Exit;
+  end;
+
  {Check Semaphore}
  if Semaphore = INVALID_HANDLE_VALUE then Exit;
  
@@ -23530,6 +24075,108 @@ begin
    FreeFIQMem(Task)
   end;
  
+ {Task will be freed by TaskerTrigger}
+end;
+
+{==============================================================================}
+
+function TaskerCompletionReset(Completion:TCompletionHandle):LongWord;
+{Perform a CompletionReset() function call using the tasker list}
+var
+ Task:PTaskerCompletionReset;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {Check Scheduler}
+ if SCHEDULER_FIQ_ENABLED then
+  begin
+   {Can call CompletionReset from FIQ if scheduler uses FIQ}
+   Result:=CompletionReset(Completion);
+
+   Exit;
+  end;
+
+ {Check Completion}
+ if Completion = INVALID_HANDLE_VALUE then Exit;
+
+ {Create Task}
+ Task:=AllocFIQMem(SizeOf(TTaskerCompletionReset),CPU_AFFINITY_NONE);
+ if Task = nil then Exit;
+
+ {Update Task}
+ Task.Task:=TASKER_TASK_COMPLETIONRESET;
+ Task.Completion:=Completion;
+
+ {Flush Task}
+ if not(HEAP_FIQ_CACHE_COHERENT) then
+  begin
+   CleanDataCacheRange(PtrUInt(Task),SizeOf(TTaskerCompletionReset));
+  end;
+
+ {Enqueue}
+ Result:=TaskerEnqueue(PTaskerTask(Task));
+ if Result <> ERROR_SUCCESS then
+  begin
+   {Free Task}
+   FreeFIQMem(Task)
+  end;
+
+ {Task will be freed by TaskerTrigger}
+end;
+
+{==============================================================================}
+
+function TaskerCompletionComplete(Completion:TCompletionHandle;All:Boolean):LongWord;
+{Perform a CompletionComplete() or CompletionCompleteAll() function call using the tasker list}
+var
+ Task:PTaskerCompletionComplete;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {Check Scheduler}
+ if SCHEDULER_FIQ_ENABLED then
+  begin
+   {Can call CompletionComplete or CompletionCompleteAll from FIQ if scheduler uses FIQ}
+   if All then
+    begin
+     Result:=CompletionCompleteAll(Completion);
+    end
+   else
+    begin
+     Result:=CompletionComplete(Completion);
+    end;
+
+   Exit;
+  end;
+
+ {Check Completion}
+ if Completion = INVALID_HANDLE_VALUE then Exit;
+
+ {Create Task}
+ Task:=AllocFIQMem(SizeOf(TTaskerCompletionComplete),CPU_AFFINITY_NONE);
+ if Task = nil then Exit;
+
+ {Update Task}
+ Task.Task:=TASKER_TASK_COMPLETIONCOMPLETE;
+ Task.Completion:=Completion;
+ Task.All:=All;
+
+ {Flush Task}
+ if not(HEAP_FIQ_CACHE_COHERENT) then
+  begin
+   CleanDataCacheRange(PtrUInt(Task),SizeOf(TTaskerCompletionComplete));
+  end;
+
+ {Enqueue}
+ Result:=TaskerEnqueue(PTaskerTask(Task));
+ if Result <> ERROR_SUCCESS then
+  begin
+   {Free Task}
+   FreeFIQMem(Task)
+  end;
+
  {Task will be freed by TaskerTrigger}
 end;
 
@@ -23702,6 +24349,23 @@ begin
       TASKER_TASK_SEMAPHORESIGNAL:begin
         {Call SemaphoreSignal}
         SemaphoreSignalEx(PTaskerSemaphoreSignal(Task).Semaphore,PTaskerSemaphoreSignal(Task).Count,nil);
+       end;
+      TASKER_TASK_COMPLETIONRESET:begin
+        {Call CompletionReset}
+        CompletionReset(PTaskerCompletionReset(Task).Completion);
+       end;
+      TASKER_TASK_COMPLETIONCOMPLETE:begin
+        {Check All}
+        if PTaskerCompletionComplete(Task).All then
+         begin
+          {Call CompletionCompleteAll}
+          CompletionCompleteAll(PTaskerCompletionComplete(Task).Completion);
+         end
+        else
+         begin
+          {Call CompletionComplete}
+          CompletionComplete(PTaskerCompletionComplete(Task).Completion);
+         end;
        end;
      end;
      
@@ -24035,6 +24699,22 @@ end;
 
 {==============================================================================}
 
+procedure SysSetThreadDebugNameA(ThreadHandle:TThreadID;const ThreadName:AnsiString);
+begin
+ {}
+ ThreadSetName(ThreadHandle,ThreadName);
+end;
+
+{==============================================================================}
+
+procedure SysSetThreadDebugNameU(ThreadHandle:TThreadID;const ThreadName:UnicodeString);
+begin
+ {}
+ ThreadSetName(ThreadHandle,AnsiString(ThreadName));
+end;
+
+{==============================================================================}
+
 procedure SysInitCriticalSection(var CriticalSection);
 begin
  {}
@@ -24168,8 +24848,11 @@ begin
 end;
 
 {==============================================================================}
-
+{$if defined(FPC_STABLE) or defined(FPC_FIXES) or defined(FPC_LEGACY)}
 function SysBasicEventWaitFor(Timeout:Cardinal;State:PEventState):LongInt;
+{$else}
+function SysBasicEventWaitFor(Timeout:Cardinal;State:PEventState;UseComWait:Boolean=False):LongInt;
+{$endif}
 const
  wrSignaled  = 0;
  wrTimeout   = 1;
@@ -24275,7 +24958,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {Thread Helper Functions}
-function SpinGetCount:LongWord; inline;
+function SpinGetCount:LongWord;
 {Get the current spin lock count}
 begin
  {}
@@ -24284,7 +24967,7 @@ end;
 
 {==============================================================================}
 
-function MutexGetCount:LongWord; inline;
+function MutexGetCount:LongWord;
 {Get the current mutex count}
 begin
  {}
@@ -24293,7 +24976,7 @@ end;
 
 {==============================================================================}
 
-function CriticalSectionGetCount:LongWord; inline;
+function CriticalSectionGetCount:LongWord;
 {Get the current critical section count}
 begin
  {}
@@ -24302,7 +24985,7 @@ end;
 
 {==============================================================================}
 
-function SemaphoreGetCount:LongWord; inline;
+function SemaphoreGetCount:LongWord;
 {Get the current semaphore count}
 begin
  {}
@@ -24311,7 +24994,7 @@ end;
 
 {==============================================================================}
 
-function SynchronizerGetCount:LongWord; inline;
+function SynchronizerGetCount:LongWord;
 {Get the current synchronizer count}
 begin
  {}
@@ -24320,7 +25003,7 @@ end;
 
 {==============================================================================}
 
-function ConditionGetCount:LongWord; inline;
+function ConditionGetCount:LongWord;
 {Get the current condition count}
 begin
  {}
@@ -24329,7 +25012,7 @@ end;
 
 {==============================================================================}
 
-function CompletionGetCount:LongWord; inline;
+function CompletionGetCount:LongWord;
 {Get the current completion count}
 begin
  {}
@@ -24338,7 +25021,7 @@ end;
 
 {==============================================================================}
 
-function ListGetCount:LongWord; inline;
+function ListGetCount:LongWord;
 {Get the current list count}
 begin
  {}
@@ -24347,7 +25030,7 @@ end;
 
 {==============================================================================}
 
-function QueueGetCount:LongWord; inline;
+function QueueGetCount:LongWord;
 {Get the current queue count}
 begin
  {}
@@ -24356,7 +25039,7 @@ end;
 
 {==============================================================================}
 
-function ThreadGetCount:LongWord; inline;
+function ThreadGetCount:LongWord;
 {Get the current thread count}
 begin
  {}
@@ -24365,7 +25048,7 @@ end;
 
 {==============================================================================}
 
-function ThreadTlsGetCount:LongWord; inline;
+function ThreadTlsGetCount:LongWord;
 {Get the current thread tls count}
 begin
  {}
@@ -24553,7 +25236,7 @@ begin
       Current.StackBase:=ThreadEntry.StackBase;
       Current.StackSize:=ThreadEntry.StackSize;
       Current.StackPointer:=ThreadEntry.StackPointer;
-      System.Move(ThreadEntry.Name[0],Current.Name[0],THREAD_NAME_LENGTH);
+      StrLCopy(Current.Name,ThreadEntry.Name,THREAD_NAME_LENGTH - 1);
       Current.Parent:=ThreadEntry.Parent; 
       Current.ExitCode:=ThreadEntry.ExitCode;  
       Current.LastError:=ThreadEntry.LastError; 
@@ -24601,7 +25284,7 @@ end;
 
 {==============================================================================}
 
-function MessageslotGetCount:LongWord; inline;
+function MessageslotGetCount:LongWord;
 {Get the current messageslot count}
 begin
  {}
@@ -24610,7 +25293,7 @@ end;
 
 {==============================================================================}
 
-function MailslotGetCount:LongWord; inline;
+function MailslotGetCount:LongWord;
 {Get the current mailslot count}
 begin
  {}
@@ -24619,7 +25302,7 @@ end;
 
 {==============================================================================}
 
-function BufferGetCount:LongWord; inline;
+function BufferGetCount:LongWord;
 {Get the current buffer count}
 begin
  {}
@@ -24628,7 +25311,7 @@ end;
 
 {==============================================================================}
 
-function EventGetCount:LongWord; inline;
+function EventGetCount:LongWord;
 {Get the current event count}
 begin
  {}
@@ -24637,7 +25320,7 @@ end;
 
 {==============================================================================}
 
-function TimerGetCount:LongWord; inline;
+function TimerGetCount:LongWord;
 {Get the current timer count}
 begin
  {}
@@ -24646,7 +25329,7 @@ end;
 
 {==============================================================================}
 
-function WorkerGetCount:LongWord; inline;
+function WorkerGetCount:LongWord;
 {Get the current worker thread count}
 begin
  {}
@@ -24655,7 +25338,7 @@ end;
 
 {==============================================================================}
 
-function WorkerGetPriorityCount:LongWord; inline;
+function WorkerGetPriorityCount:LongWord;
 {Get the current worker priority thread count}
 begin
  {}
@@ -24664,7 +25347,7 @@ end;
 
 {==============================================================================}
 
-function TaskerGetCount:LongWord; inline;
+function TaskerGetCount:LongWord;
 {Get the current tasker count}
 begin
  {}
@@ -25108,7 +25791,7 @@ function SchedulerGetThreadPreempt(CPUID:LongWord):LongWord;
 {Get the current thread preempt setting for the specified CPU}
 begin
  {}
- Result:=0;
+ Result:=SCHEDULER_PREEMPT_DISABLED;
 
  {Check CPU}
  if CPUID > (SCHEDULER_CPU_COUNT - 1) then Exit;
@@ -25123,7 +25806,7 @@ function SchedulerGetThreadAllocation(CPUID:LongWord):LongWord;
 {Get the current thread allocation setting for the specified CPU}
 begin
  {}
- Result:=0;
+ Result:=SCHEDULER_ALLOCATION_DISABLED;
 
  {Check CPU}
  if CPUID > (SCHEDULER_CPU_COUNT - 1) then Exit;
@@ -25232,9 +25915,9 @@ end;
 {==============================================================================}
 
 initialization
- {Call SetThreadManager again because initialization of the embedded system unit (InitSystemThreads) sets the NoThreadManager}
+ {Call SetThreadManager again because initialization of the system unit (InitSystemThreads) sets the NoThreadManager}
  SetThreadManager(MyThreadManager);
- {Set the Main Thread ID again because initialization of the embedded system unit (InitSystemThreads) sets it to ThreadID(1)}
+ {Set the Main Thread ID again because initialization of the system unit (InitSystemThreads) sets it to ThreadID(1)}
  ThreadID:=ThreadGetCurrent;
  
 {==============================================================================}

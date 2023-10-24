@@ -1,7 +1,7 @@
 {
 Ultibo Services interface unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2022 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -29,7 +29,7 @@ References
  
  Ping
  
-  RFC????
+  RFC792 - Internet Control Message Protocol - https://www.rfc-editor.org/rfc/rfc792
  
  NTP
   
@@ -84,7 +84,8 @@ unit Services;
 
 interface
 
-uses GlobalConfig,GlobalConst,GlobalTypes,Platform,Threads,Devices,Logging,SysUtils,Classes,Ultibo,UltiboClasses,Winsock2,Crypto,Authentication;
+uses GlobalConfig,GlobalConst,GlobalTypes,Platform,Threads,Devices,Logging,SysUtils,
+     Classes,Ultibo,UltiboClasses,Winsock2,Protocol,ICMP,Crypto,Authentication;
 
 {==============================================================================}
 {Global definitions}
@@ -95,7 +96,10 @@ const
  {Services specific constants}
  
  {Ping constants}
- //To do
+ PING_DEFAULT_SIZE = 32;      {Default number of bytes of data to send with echo (Ping) request} 
+ PING_MAXIMUM_SIZE = 65500;   {Maximum number of bytes of data to send with echo (Ping) request} 
+ PING_DEFAULT_COUNT = 4;      {Default number of echo (ping) requests to send in a sequence}
+ PING_DEFAULT_TIMEOUT = 3000; {Default time to wait for echo (Ping) response (Milliseconds)} 
  
  {NTP constants}
  NTP_VERSION_1 = 1;
@@ -289,7 +293,6 @@ type
  {Services specific types}
  
  {Ping types}
- //To do
  
  {NTP types}
  PNTPShort = ^TNTPShort;
@@ -344,19 +347,77 @@ type
  
  {Ping classes}
  TPingClient = class(TWinsock2RAWClient)
+ public
+  {}
+  constructor Create;
  private
   {Internal Variables}
+  FSize:LongWord;
+  FCount:LongWord;
+  FTimeout:LongWord;
+
+  FTimeToLive:Byte;
+  FNoFragment:Boolean;
+
+  FLastHost:String;
+  FLastAddress:String;
+
+  FLastTime:LongWord;
+  FReplyAddress:String;
+
+  FLastSequence:Word;
+  FLastIdentifier:Word;
+
+  FSendCount:LongWord;
+  FReceiveCount:LongWord;
+  FLostCount:LongWord;
 
   {Internal Methods}
-   
+  procedure SetSize(ASize:LongWord);
+  procedure SetCount(ACount:LongWord);
+  procedure SetTimeout(ATimeout:LongWord);
+
+  procedure SetTimeToLive(ATimeToLive:Byte);
+  procedure SetNoFragment(ANoFragment:Boolean);
+
+  function GetLastCount:LongWord;
+
+  function GetErrorCode:LongInt;
+  function GetErrorText:String;
+ protected
+  {Internal Methods}
+  procedure ResetPing; virtual;
  public
   {Public Properties}
- 
+  property Size:LongWord read FSize write SetSize;
+  property Count:LongWord read FCount write SetCount;
+  property Timeout:LongWord read FTimeout write SetTimeout;
+
+  property TimeToLive:Byte read FTimeToLive write SetTimeToLive;
+  property NoFragment:Boolean read FNoFragment write SetNoFragment;
+
+  property LastHost:String read FLastHost;
+  property LastAddress:String read FLastAddress;
+
+  property LastTime:LongWord read FLastTime;
+  property LastCount:LongWord read GetLastCount;
+  property ReplyAddress:String read FReplyAddress;
+
+  property LastSequence:Word read FLastSequence;
+  property LastIdentifier:Word read FLastIdentifier;
+
+  property SendCount:LongWord read FSendCount;
+  property ReceiveCount:LongWord read FReceiveCount;
+  property LostCount:LongWord read FLostCount;
+
+  property ErrorCode:LongInt read GetErrorCode;
+  property ErrorText:String read GetErrorText;
+
   {Public Methods}
-  //To Do
-  //function SendPing(const AHost:String
+  function FirstPing(const AHost:String):Boolean;
+  function NextPing:Boolean;
  end;
- 
+
  {NTP classes}
  TNTPClient = class(TWinsock2UDPClient)
  public
@@ -373,8 +434,12 @@ type
   
   FRetryTimeout:LongWord;        {How long to wait between poll retries (in milliseconds)}
   
+  FUseClockOffset:Boolean;       {Use the calculated NTP clock offset to update the local time}
+  FClockTolerance:LongWord;      {Milliseconds difference between local and remote to trigger a clock set}
+  
   FInitialClockGet:Boolean;      {Has the time been obtained at least once}
   FInitialClockCount:LongWord;   {How many times have we tried to obtain the initial clock}
+  FInitialClockRetry:Boolean;    {Should the client setup a worker thread to retry until the initial clock has been set (Default: True)}
   
   FTimerHandle:TTimerHandle;     {Handle for the NTP update timer}
   
@@ -387,9 +452,13 @@ type
   procedure SetPollRetries(APollRetries:LongWord);
   
   procedure SetRetryTimeout(ARetryTimeout:LongWord);
+
+  procedure SetUseClockOffset(AUseClockOffset:Boolean);
+  procedure SetClockTolerance(AClockTolerance:LongWord);
   
   procedure SetInitialClockGet(AInitialClockGet:Boolean);
   procedure SetInitialClockCount(AInitialClockCount:LongWord);
+  procedure SetInitialClockRetry(AInitialClockRetry:Boolean);
   
   procedure SetTimerHandle(ATimerHandle:TTimerHandle);
  public
@@ -399,9 +468,13 @@ type
   property PollRetries:LongWord read FPollRetries write SetPollRetries;
   
   property RetryTimeout:LongWord read FRetryTimeout write SetRetryTimeout;
-  
+
+  property UseClockOffset:Boolean read FUseClockOffset write SetUseClockOffset;
+  property ClockTolerance:LongWord read FClockTolerance write SetClockTolerance;
+
   property InitialClockGet:Boolean read FInitialClockGet write SetInitialClockGet;
   property InitialClockCount:LongWord read FInitialClockCount write SetInitialClockCount;
+  property InitialClockRetry:Boolean read FInitialClockRetry write SetInitialClockRetry;
   
   property TimerHandle:TTimerHandle read FTimerHandle write SetTimerHandle;
   
@@ -409,6 +482,12 @@ type
   function GetTime:Int64;
   
   procedure IncrementInitialClockCount;
+  
+  function FormatTime(Time:Int64):String;
+  function FormatOffset(Offset:Int64):String;
+  
+  function CalculateClockOffset(T1,T2,T3,T4:Int64):Int64;
+  function CalculateRoundtripDelay(T1,T2,T3,T4:Int64):Int64;
  end;
  
  {Telnet classes}
@@ -699,9 +778,12 @@ function NTPTimestampToNetwork(const Timestamp:TNTPTimestamp):TNTPTimestamp;
 
 function NTPTimestampAdd(const Timestamp1,Timestamp2:TNTPTimestamp):TNTPTimestamp;
 function NTPTimestampSubtract(const Timestamp1,Timestamp2:TNTPTimestamp):TNTPTimestamp;
+function NTPTimestampDivide(const Timestamp:TNTPTimestamp;Divisor:LongWord):TNTPTimestamp;
 
 function ClockTimeToNTPTimestamp(const Time:Int64):TNTPTimestamp;
 function NTPTimestampToClockTime(const Timestamp:TNTPTimestamp):Int64;
+
+function NTPTimestampToString(const Timestamp:TNTPTimestamp):String;
 
 {==============================================================================}
 {Telnet Helper Functions}
@@ -737,6 +819,483 @@ var
 {==============================================================================}
 {==============================================================================}
 {TPingClient}
+constructor TPingClient.Create;
+{Constructor for TPingClient class}
+begin
+ {}
+ inherited Create;
+ 
+ FSize:=PING_DEFAULT_SIZE;
+ FCount:=PING_DEFAULT_COUNT;
+ FTimeout:=PING_DEFAULT_TIMEOUT;
+end;
+
+{==============================================================================}
+
+procedure TPingClient.SetSize(ASize:LongWord);
+{Set the size in bytes of the data for the ping request}
+begin
+ {}
+ if FSize <> ASize then
+  begin
+   FSize:=ASize;
+   if FSize > PING_MAXIMUM_SIZE then FSize:=PING_DEFAULT_SIZE;
+
+   ResetPing;
+  end; 
+end;
+
+{==============================================================================}
+
+procedure TPingClient.SetCount(ACount:LongWord);
+{Set the number of ping requests to perform}
+begin
+ {}
+ if FCount <> ACount then
+  begin
+   FCount:=ACount;
+   if FCount = 0 then FCount:=PING_DEFAULT_COUNT;
+
+   ResetPing;
+  end; 
+end;
+
+{==============================================================================}
+
+procedure TPingClient.SetTimeout(ATimeout:LongWord);
+{Set the time to wait for a reply to each request (Milliseconds)}
+begin
+ {}
+ if FTimeout <> ATimeout then
+  begin
+   FTimeout:=ATimeout;
+   if FTimeout = 0 then FTimeout:=PING_DEFAULT_TIMEOUT;
+
+   ResetPing;
+  end; 
+end;
+
+{==============================================================================}
+
+procedure TPingClient.SetTimeToLive(ATimeToLive:Byte);
+{Set the time to live in hops for each request}
+begin
+ {}
+ if FTimeToLive <> ATimeToLive then
+  begin
+   FTimeToLive:=ATimeToLive;
+
+   ResetPing;
+  end; 
+end;
+
+{==============================================================================}
+
+procedure TPingClient.SetNoFragment(ANoFragment:Boolean);
+{Set the don't fragment bit in the header of each request}
+begin
+ {}
+ if FNoFragment <> ANoFragment then
+  begin
+   FNoFragment:=ANoFragment;
+
+   ResetPing;
+  end; 
+end;
+
+{==============================================================================}
+
+function TPingClient.GetLastCount:LongWord;
+{Get the current count after the latest request}
+begin
+ {}
+ Result:=FLastSequence;
+end;
+
+{==============================================================================}
+
+function TPingClient.GetErrorCode:LongInt;
+{Get the error code from the latest request}
+begin
+ {}
+ Result:=FLastError;
+end;
+
+{==============================================================================}
+
+function TPingClient.GetErrorText:String;
+{Get the error message from the latest request}
+begin
+ {}
+ Result:=Winsock2ErrorToString(FLastError);
+end;
+
+{==============================================================================}
+
+procedure TPingClient.ResetPing;
+{Reset the state and clear the current ping request}
+begin
+ {}
+ {Disconnect}
+ Disconnect;
+
+ {Reset State}
+ FLastHost:='';
+ FLastAddress:='';
+ 
+ FLastTime:=0;
+ FLastError:=0;
+ FReplyAddress:='';
+
+ FLastSequence:=0;
+
+ FSendCount:=0;
+ FReceiveCount:=0;
+ FLostCount:=0;
+end;
+
+{==============================================================================}
+
+function TPingClient.FirstPing(const AHost:String):Boolean;
+{Start a new ping sequence to the specified host or address}
+{Host: The host name or address to ping}
+
+{Note: After the first ping, NextPing should be called repeatedly until completed}
+var
+ Start:Int64;
+ Len:LongWord;
+ Count:LongInt;
+ Reply:PByte;
+ Request:PByte;
+ WorkInt:LongInt;
+begin
+ {}
+ Result:=False;
+
+ {Check Host}
+ if Length(AHost) = 0 then Exit;
+
+ {Reset}
+ ResetPing;
+
+ {Set Protocol}
+ Protocol:=IPPROTO_ICMP;
+
+ {Set Connect}
+ UseConnect:=False;
+
+ {Update Sequence}
+ Inc(FLastSequence);
+
+ {Update Identifier}
+ Inc(FLastIdentifier);
+
+ {Connect}
+ if not Connect then Exit;
+ try
+  {Set Host}
+  FLastHost:=AHost;
+
+  {Set Address}
+  FLastAddress:=ResolveHost(FLastHost);
+  if Length(FLastAddress) = 0 then Exit;
+
+  {Set Timeouts}
+  SendTimeout:=FTimeout;
+  ReceiveTimeout:=FTimeout;
+
+  {Set TTL}
+  if FTimeToLive > 0 then
+   begin
+    WorkInt:=FTimeToLive;
+    if Winsock2.setsockopt(Handle,IPPROTO_IP,IP_TTL,PChar(@WorkInt),SizeOf(LongInt)) <> ERROR_SUCCESS then Exit;
+   end;
+
+  {Set Dont Fragment}
+  if FNoFragment then
+   begin
+    WorkInt:=1;
+    if Winsock2.setsockopt(Handle,IPPROTO_IP,IP_DONTFRAGMENT,PChar(@WorkInt),SizeOf(LongInt)) <> ERROR_SUCCESS then Exit;
+   end;
+
+  {Get Length}
+  Len:=SizeOf(TICMPEchoHeader) + FSize;
+
+  {Allocate Request}
+  Request:=AllocMem(Len);
+  try
+   {Setup Echo Request}
+   PICMPEchoHeader(Request).ICMPType:=ICMP_ECHO;
+   PICMPEchoHeader(Request).Code:=0;
+   PICMPEchoHeader(Request).Checksum:=0;
+   PICMPEchoHeader(Request).Identifier:=WordNtoBE(FLastIdentifier);
+   PICMPEchoHeader(Request).Sequence:=WordNtoBE(FLastSequence);
+
+   {Setup Echo Data}
+   if FSize > 0 then
+    begin
+     FillChar(Pointer(Request + SizeOf(TICMPEchoHeader))^,FSize,#65);
+    end;
+
+   {Calculate the Checksum}
+   PICMPEchoHeader(Request).Checksum:=ChecksumICMP(ResolveFamily(FLastAddress),Request,0,Len);
+
+   {Get Time}
+   Start:=GetTickCount64;
+
+   {Send Echo Request}
+   Count:=SendDataTo(FLastAddress,Request,Len);
+   if Count = Len then
+    begin
+     {Update Count}
+     Inc(FSendCount);
+
+     {Allocate Reply}
+     Reply:=AllocMem($FFFF);
+     try
+      {Receive Echo Reply}
+      Count:=RecvDataFrom(FReplyAddress,Reply,$FFFF);
+      if Count >= Len then
+       begin
+        {Save Time}
+        FLastTime:=GetTickCount64 - Start;
+
+        {Update Count}
+        Inc(FReceiveCount);
+
+        {Check Reply}
+        if PICMPEchoHeader(Reply).ICMPType = ICMP_ECHOREPLY then
+         begin
+          {Check Sequence}
+          if PICMPEchoHeader(Reply).Sequence = PICMPEchoHeader(Request).Sequence then
+           begin
+            Result:=True;
+           end
+          else
+           begin
+            FLastError:=WSAEINVAL;
+           end; 
+         end
+        else if PICMPUnreachHeader(Reply).ICMPType = ICMP_UNREACH then
+         begin
+          {Check Code}
+          if PICMPUnreachHeader(Reply).Code = ICMP_UNREACH_NET then
+           begin
+            FLastError:=WSAENETUNREACH;
+           end
+          else if PICMPUnreachHeader(Reply).Code = ICMP_UNREACH_HOST then 
+           begin
+            FLastError:=WSAEHOSTUNREACH;
+           end
+          else if PICMPUnreachHeader(Reply).Code = ICMP_UNREACH_NEEDFRAG then 
+           begin
+            FLastError:=WSAEOPNOTSUPP;
+           end
+          else
+           begin
+            FLastError:=WSAENETUNREACH; {WSAEINVAL}
+           end;
+         end
+        else if PICMPExpireHeader(Reply).ICMPType = ICMP_TIMXCEED then
+         begin
+          FLastError:=WSAETIMEDOUT;
+         end
+        else
+         begin
+          FLastError:=WSAEINVAL;
+         end;
+       end
+      else
+       begin
+        if FLastError = ERROR_SUCCESS then FLastError:=WSAEINVAL;
+
+        {Update Count}
+        Inc(FLostCount);
+       end;
+     finally
+      {Free Reply}
+      FreeMem(Reply);
+     end; 
+    end
+   else
+    begin
+     if FLastError = ERROR_SUCCESS then FLastError:=WSAEINVAL;
+    end;
+  finally
+   {Free Request}
+   FreeMem(Request);
+  end;
+ finally
+  {Disconnect}
+  WorkInt:=FLastError;
+
+  Disconnect;
+  FLastError:=WorkInt;
+ end; 
+end;
+
+{==============================================================================}
+
+function TPingClient.NextPing:Boolean;
+{Continue pinging the current address with the current parameters}
+
+{Note: Once LastCount equals Count the sequence is complete and this method will return False}
+var
+ Start:Int64;
+ Len:LongWord;
+ Count:LongInt;
+ Reply:PByte;
+ Request:PByte;
+ WorkInt:LongInt;
+begin
+ {}
+ Result:=False;
+ 
+ {Check Sequence}
+ if FLastSequence = 0 then Exit;
+
+ {Check Sequence}
+ if FLastSequence = FCount then Exit;
+
+ {Update Sequence}
+ Inc(FLastSequence);
+
+ {Connect}
+ if not Connect then Exit;
+ try
+  {Set Timeouts}
+  SendTimeout:=FTimeout;
+  ReceiveTimeout:=FTimeout;
+
+  {Set TTL}
+  if FTimeToLive > 0 then
+   begin
+    WorkInt:=FTimeToLive;
+    if Winsock2.setsockopt(Handle,IPPROTO_IP,IP_TTL,PChar(@WorkInt),SizeOf(LongInt)) <> ERROR_SUCCESS then Exit;
+   end;
+
+  {Set Dont Fragment}
+  if FNoFragment then
+   begin
+    WorkInt:=1;
+    if Winsock2.setsockopt(Handle,IPPROTO_IP,IP_DONTFRAGMENT,PChar(@WorkInt),SizeOf(LongInt)) <> ERROR_SUCCESS then Exit;
+   end;
+
+  {Get Length}
+  Len:=SizeOf(TICMPEchoHeader) + FSize;
+
+  {Allocate Request}
+  Request:=AllocMem(Len);
+  try
+   {Setup Echo Request}
+   PICMPEchoHeader(Request).ICMPType:=ICMP_ECHO;
+   PICMPEchoHeader(Request).Code:=0;
+   PICMPEchoHeader(Request).Checksum:=0;
+   PICMPEchoHeader(Request).Identifier:=WordNtoBE(FLastIdentifier);
+   PICMPEchoHeader(Request).Sequence:=WordNtoBE(FLastSequence);
+
+   {Setup Echo Data}
+   if FSize > 0 then
+    begin
+     FillChar(Pointer(Request + SizeOf(TICMPEchoHeader))^,FSize,#65);
+    end;
+
+   {Calculate the Checksum}
+   PICMPEchoHeader(Request).Checksum:=ChecksumICMP(ResolveFamily(FLastAddress),Request,0,Len);
+
+   {Get Start Count}
+   Start:=GetTickCount64;
+
+   {Send Echo Request}
+   Count:=SendDataTo(FLastAddress,Request,Len);
+   if Count = Len then
+    begin
+     {Update Count}
+     Inc(FSendCount);
+
+     {Allocate Reply}
+     Reply:=AllocMem($FFFF);
+     try
+      {Receive Echo Reply}
+      Count:=RecvDataFrom(FReplyAddress,Reply,$FFFF);
+      if Count >= Len then
+       begin
+        {Save Time}
+        FLastTime:=GetTickCount64 - Start;
+
+        {Update Count}
+        Inc(FReceiveCount);
+
+        {Check Reply}
+        if PICMPEchoHeader(Reply).ICMPType = ICMP_ECHOREPLY then
+         begin
+          {Check Sequence}
+          if PICMPEchoHeader(Reply).Sequence = PICMPEchoHeader(Request).Sequence then
+           begin
+            Result:=True;
+           end
+          else
+           begin
+            FLastError:=WSAEINVAL;
+           end; 
+         end
+        else if PICMPUnreachHeader(Reply).ICMPType = ICMP_UNREACH then
+         begin
+          {Check Code}
+          if PICMPUnreachHeader(Reply).Code = ICMP_UNREACH_NET then
+           begin
+            FLastError:=WSAENETUNREACH;
+           end
+          else if PICMPUnreachHeader(Reply).Code = ICMP_UNREACH_HOST then 
+           begin
+            FLastError:=WSAEHOSTUNREACH;
+           end
+          else if PICMPUnreachHeader(Reply).Code = ICMP_UNREACH_NEEDFRAG then 
+           begin
+            FLastError:=WSAEOPNOTSUPP;
+           end
+          else
+           begin
+            FLastError:=WSAENETUNREACH; {WSAEINVAL}
+           end;
+         end
+        else if PICMPExpireHeader(Reply).ICMPType = ICMP_TIMXCEED then
+         begin
+          FLastError:=WSAETIMEDOUT;
+         end
+        else
+         begin
+          FLastError:=WSAEINVAL;
+         end;
+       end
+      else
+       begin
+        if FLastError = ERROR_SUCCESS then FLastError:=WSAEINVAL;
+
+        {Update Count}
+        Inc(FLostCount);
+       end;
+     finally
+      {Free Reply}
+      FreeMem(Reply);
+     end; 
+    end
+   else
+    begin
+     if FLastError = ERROR_SUCCESS then FLastError:=WSAEINVAL;
+    end;
+  finally
+   {Free Request}
+   FreeMem(Request);
+  end; 
+ finally
+  {Disconnect}
+  WorkInt:=FLastError;
+
+  Disconnect;
+  FLastError:=WorkInt;
+ end; 
+end;
 
 {==============================================================================}
 {==============================================================================}
@@ -752,9 +1311,13 @@ begin
  FPollRetries:=NTP_POLLING_RETRIES;
  
  FRetryTimeout:=NTP_RETRY_TIMEOUT;
- 
+
+ FUseClockOffset:=NTP_USE_CLOCK_OFFSET;
+ FClockTolerance:=NTP_CLOCK_TOLERANCE;
+
  FInitialClockGet:=False;
  FInitialClockCount:=0;
+ FInitialClockRetry:=True;
  
  FTimerHandle:=INVALID_HANDLE_VALUE;
  
@@ -845,6 +1408,30 @@ end;
 
 {==============================================================================}
 
+procedure TNTPClient.SetUseClockOffset(AUseClockOffset:Boolean);
+begin
+ {}
+ if not AcquireLock then Exit;
+
+ FUseClockOffset:=AUseClockOffset;
+
+ ReleaseLock;
+end;
+
+{==============================================================================}
+
+procedure TNTPClient.SetClockTolerance(AClockTolerance:LongWord);
+begin
+ {}
+ if not AcquireLock then Exit;
+
+ FClockTolerance:=AClockTolerance;
+
+ ReleaseLock;
+end;
+
+{==============================================================================}
+
 procedure TNTPClient.SetInitialClockGet(AInitialClockGet:Boolean);
 begin
  {}
@@ -863,6 +1450,18 @@ begin
  if not AcquireLock then Exit;
  
  FInitialClockCount:=AInitialClockCount;
+ 
+ ReleaseLock;
+end;
+
+{==============================================================================}
+
+procedure TNTPClient.SetInitialClockRetry(AInitialClockRetry:Boolean);
+begin
+ {}
+ if not AcquireLock then Exit;
+ 
+ FInitialClockRetry:=AInitialClockRetry;
  
  ReleaseLock;
 end;
@@ -889,8 +1488,13 @@ var
  Count:LongWord;
  NTPReply:PNTPPacket;
  NTPRequest:PNTPPacket;
- ClockOffset:TNTPTimestamp;
- RoundtripDelay:TNTPTimestamp;
+ ReceiveTime:Int64;
+ TransmitTime:Int64;
+ ReferenceTime:Int64;
+ OriginateTime:Int64;
+ DestinationTime:Int64;
+ ClockOffset:Int64;
+ RoundtripDelay:Int64;
  DestinationTimestamp:TNTPTimestamp;
 begin
  {}
@@ -943,8 +1547,9 @@ begin
       {$ENDIF}
       
       {Setup NTP Request}
+      TransmitTime:=ClockGetTime;
       NTPRequest.LeapVersionMode:=(NTP_LEAP_NONE shl 6) or (NTP_VERSION shl 3) or (NTP_MODE_CLIENT shl 0);
-      NTPRequest.TransmitTimestamp:=ClockTimeToNTPTimestamp(ClockGetTime);
+      NTPRequest.TransmitTimestamp:=ClockTimeToNTPTimestamp(TransmitTime);
       
       {Send NTP Request}
       if SendData(NTPRequest,SizeOf(TNTPPacket)) = SizeOf(TNTPPacket) then
@@ -959,12 +1564,13 @@ begin
         if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Precision = ' + IntToHex(NTPRequest.Precision,2));
         if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Root Delay = ' + IntToHex(NTPRequest.RootDelay,8));
         if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Root Dispersion = ' + IntToHex(NTPRequest.RootDispersion,8));
-        if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Reference Timestamp = ' + IntToHex(NTPRequest.ReferenceTimestamp.Seconds,8) + ' / ' + IntToHex(NTPRequest.ReferenceTimestamp.Fraction,8));
-        if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Originate Timestamp = ' + IntToHex(NTPRequest.OriginateTimestamp.Seconds,8) + ' / ' + IntToHex(NTPRequest.OriginateTimestamp.Fraction,8));
-        if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Receive Timestamp = ' + IntToHex(NTPRequest.ReceiveTimestamp.Seconds,8) + ' / ' + IntToHex(NTPRequest.ReceiveTimestamp.Fraction,8));
-        if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Transmit Timestamp = ' + IntToHex(NTPRequest.TransmitTimestamp.Seconds,8) + ' / ' + IntToHex(NTPRequest.TransmitTimestamp.Fraction,8));
+        if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Reference Timestamp = ' + NTPTimestampToString(NTPRequest.ReferenceTimestamp));
+        if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Originate Timestamp = ' + NTPTimestampToString(NTPRequest.OriginateTimestamp));
+        if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Receive Timestamp = ' + NTPTimestampToString(NTPRequest.ReceiveTimestamp));
+        if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Transmit Timestamp = ' + NTPTimestampToString(NTPRequest.TransmitTimestamp));
+        if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:                       ' + FormatTime(TransmitTime));
         {$ENDIF}
-      
+
         {Create NTP Reply}
         NTPReply:=AllocMem(SizeOf(TNTPPacket));
         if NTPReply = nil then Exit;
@@ -972,22 +1578,35 @@ begin
          {$IFDEF NTP_DEBUG}
          if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client: Receiving Reply');
          {$ENDIF}
-      
+
          {Receive NTP Reply}
          if RecvData(NTPReply,SizeOf(TNTPPacket)) > 0 then
           begin
            {Get Destination Timestamp}
-           DestinationTimestamp:=ClockTimeToNTPTimestamp(ClockGetTime);
-           
+           DestinationTime:=ClockGetTime;
+           DestinationTimestamp:=ClockTimeToNTPTimestamp(DestinationTime);
+
            {Get Leap}
            Leap:=(NTPReply.LeapVersionMode shr 6) and NTP_LEAP_MASK;
-         
+
            {Get Version}
            Version:=(NTPReply.LeapVersionMode shr 3) and NTP_VERSION_MASK;
-         
+
            {Get Mode}
            Mode:=(NTPReply.LeapVersionMode shr 0) and NTP_MODE_MASK;
-         
+
+           {Get Reference Time}
+           ReferenceTime:=NTPTimestampToClockTime(NTPReply.ReferenceTimestamp);
+
+           {Get Originate Time}
+           OriginateTime:=NTPTimestampToClockTime(NTPReply.OriginateTimestamp);
+
+           {Get Receive Time}
+           ReceiveTime:=NTPTimestampToClockTime(NTPReply.ReceiveTimestamp);
+
+           {Get Transmit Time}
+           TransmitTime:=NTPTimestampToClockTime(NTPReply.TransmitTimestamp);
+
            {$IFDEF NTP_DEBUG}
            if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client: Reply Received');
            if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Leap = ' + IntToHex(Leap,2));
@@ -998,13 +1617,18 @@ begin
            if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Precision = ' + IntToHex(NTPReply.Precision,2));
            if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Root Delay = ' + IntToHex(NTPReply.RootDelay,8));
            if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Root Dispersion = ' + IntToHex(NTPReply.RootDispersion,8));
-           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Reference Timestamp = ' + IntToHex(NTPReply.ReferenceTimestamp.Seconds,8) + ' / ' + IntToHex(NTPReply.ReferenceTimestamp.Fraction,8));
-           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Originate Timestamp = ' + IntToHex(NTPReply.OriginateTimestamp.Seconds,8) + ' / ' + IntToHex(NTPReply.OriginateTimestamp.Fraction,8));
-           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Receive Timestamp = ' + IntToHex(NTPReply.ReceiveTimestamp.Seconds,8) + ' / ' + IntToHex(NTPReply.ReceiveTimestamp.Fraction,8));
-           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Transmit Timestamp = ' + IntToHex(NTPReply.TransmitTimestamp.Seconds,8) + ' / ' + IntToHex(NTPReply.TransmitTimestamp.Fraction,8));
-           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Destination Timestamp = ' + IntToHex(DestinationTimestamp.Seconds,8) + ' / ' + IntToHex(DestinationTimestamp.Fraction,8));
+           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Reference Timestamp = ' + NTPTimestampToString(NTPReply.ReferenceTimestamp));
+           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:                        ' + FormatTime(ReferenceTime));
+           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Originate Timestamp = ' + NTPTimestampToString(NTPReply.OriginateTimestamp));
+           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:                        ' + FormatTime(OriginateTime));
+           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Receive Timestamp = ' + NTPTimestampToString(NTPReply.ReceiveTimestamp));
+           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:                      ' + FormatTime(ReceiveTime));
+           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Transmit Timestamp = ' + NTPTimestampToString(NTPReply.TransmitTimestamp));
+           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:                       ' + FormatTime(TransmitTime));
+           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Destination Timestamp = ' + NTPTimestampToString(DestinationTimestamp));
+           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:                          ' + FormatTime(DestinationTime));
            {$ENDIF}
-         
+
            {Check NTP Reply}
            {Leap}
            if Leap = NTP_LEAP_ALARM then
@@ -1036,40 +1660,54 @@ begin
              if SERVICE_LOG_ENABLED then ServiceLogError('NTP Client: Transmit timestamp not valid in reply');
              Exit;
             end; 
-         
+
            {$IFDEF NTP_DEBUG}
            if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client: Reply Validated');
            {$ENDIF}
-          
-           {T1 = Originate Timestamp (time request sent by client)
-            T2 = Receive Timestamp (time request received by server)
-            T3 = Transmit Timestamp (time reply sent by server)
-            T4 = Destination Timestamp (time reply received by client)}
-            
-           {Calculate Roudtrip Delay} {RoundtripDelay = (T4 - T1) - (T3 - T2)}
-           RoundtripDelay:=NTPTimestampSubtract(NTPTimestampSubtract(DestinationTimestamp,NTPReply.OriginateTimestamp),NTPTimestampSubtract(NTPReply.TransmitTimestamp,NTPReply.ReceiveTimestamp));
 
-           {$IFDEF NTP_DEBUG}
-           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Roundtrip Delay = ' + IntToHex(RoundtripDelay.Seconds,8) + ' / ' + IntToHex(RoundtripDelay.Fraction,8));
-           {$ENDIF}
-          
-           {Calculate Clock  Offset} {ClockOffset = ((T2 - T1) + (T3 - T4)) / 2}
-           ClockOffset:=NTPTimestampAdd(NTPTimestampSubtract(NTPReply.ReceiveTimestamp,NTPReply.OriginateTimestamp),NTPTimestampSubtract(NTPReply.TransmitTimestamp,DestinationTimestamp));
-           //To Do //div 2; //Use this value to adjust NTPReply.TransmitTimestamp before returning
-          
-           {$IFDEF NTP_DEBUG}
-           if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Clock Offset = ' + IntToHex(ClockOffset.Seconds,8) + ' / ' + IntToHex(ClockOffset.Fraction,8));
-           {$ENDIF}
-           
-           {Get Time}
-           Result:=NTPTimestampToClockTime(NTPReply.TransmitTimestamp);
+           {Check Time and Offset}
+           if (DestinationTime > TIME_TICKS_TO_2001) and UseClockOffset then
+            begin
+             {T1 = Originate Timestamp (time request sent by client)
+              T2 = Receive Timestamp (time request received by server)
+              T3 = Transmit Timestamp (time reply sent by server)
+              T4 = Destination Timestamp (time reply received by client)}
+
+             {Calculate Roudtrip Delay} {RoundtripDelay = (T4 - T1) - (T3 - T2)}
+             {RoundtripDelay:=NTPTimestampSubtract(NTPTimestampSubtract(DestinationTimestamp,NTPReply.OriginateTimestamp),NTPTimestampSubtract(NTPReply.TransmitTimestamp,NTPReply.ReceiveTimestamp));}
+             RoundtripDelay:=CalculateRoundtripDelay(OriginateTime,ReceiveTime,TransmitTime,DestinationTime);
+
+             {$IFDEF NTP_DEBUG}
+             if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Roundtrip Delay = ' + FormatOffset(RoundtripDelay));
+             {$ENDIF}
+
+             {Calculate Clock  Offset} {ClockOffset = ((T2 - T1) + (T3 - T4)) / 2}
+             {ClockOffset:=NTPTimestampDivide(NTPTimestampAdd(NTPTimestampSubtract(NTPReply.ReceiveTimestamp,NTPReply.OriginateTimestamp),NTPTimestampSubtract(NTPReply.TransmitTimestamp,DestinationTimestamp)),2);}
+             ClockOffset:=CalculateClockOffset(OriginateTime,ReceiveTime,TransmitTime,DestinationTime);
+
+             {$IFDEF NTP_DEBUG}
+             if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Clock Offset = ' + FormatOffset(ClockOffset));
+             {$ENDIF}
+
+             {Get Time}
+             Result:=DestinationTime + ClockOffset;
+            end
+           else
+            begin
+             {$IFDEF NTP_DEBUG}
+             if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Client:  Local time not set or clock offset disabled');
+             {$ENDIF}
+
+             {Get Time}
+             Result:=TransmitTime;
+            end;
            Exit;
           end;          
         finally
          FreeMem(NTPReply);
         end;     
        end;       
-    
+
       Dec(Count);
       Sleep(RetryTimeout);
 
@@ -1099,6 +1737,54 @@ begin
  Inc(FInitialClockCount);
  
  ReleaseLock;
+end;
+
+{==============================================================================}
+
+function TNTPClient.FormatTime(Time:Int64):String;
+begin
+ {}
+ Result:=SystemDateTimeToString(SystemFileTimeToDateTime(TFileTime(Time)));
+end;
+
+{==============================================================================}
+
+function TNTPClient.FormatOffset(Offset:Int64):String;
+var
+ Seconds:Int64;
+ Microseconds:Int64;
+begin
+ {}
+ Seconds:=Offset div TIME_TICKS_PER_SECOND;
+ Microseconds:=(Offset mod TIME_TICKS_PER_SECOND) div TIME_TICKS_PER_MICROSECOND;
+ 
+ Result:=IntToStr(Seconds) + ' seconds ' + IntToStr(Microseconds) + ' microseconds';
+end;
+
+{==============================================================================}
+
+function TNTPClient.CalculateClockOffset(T1,T2,T3,T4:Int64):Int64;
+{T1 = Originate Timestamp (time request sent by client)
+ T2 = Receive Timestamp (time request received by server)
+ T3 = Transmit Timestamp (time reply sent by server)
+ T4 = Destination Timestamp (time reply received by client)}
+{ClockOffset = ((T2 - T1) + (T3 - T4)) / 2} 
+begin
+ {}
+ Result:=((T2 - T1) + (T3 - T4)) div 2;
+end;
+
+{==============================================================================}
+
+function TNTPClient.CalculateRoundtripDelay(T1,T2,T3,T4:Int64):Int64;
+{T1 = Originate Timestamp (time request sent by client)
+ T2 = Receive Timestamp (time request received by server)
+ T3 = Transmit Timestamp (time reply sent by server)
+ T4 = Destination Timestamp (time reply received by client)}
+{RoundtripDelay = (T4 - T1) - (T3 - T2)}
+begin
+ {}
+ Result:=(T4 - T1) - (T3 - T2);
 end;
 
 {==============================================================================}
@@ -3064,7 +3750,29 @@ procedure NTPUpdateTime(Client:TNTPClient);
   {}
   Result:=(Time div TIME_TICKS_PER_SECOND) * TIME_TICKS_PER_SECOND;
  end;
- 
+
+ function MillisecondsDifference(Time1,Time2:Int64):Int64;
+ {Determine how many milliseconds difference between two time values in 100ns intervals}
+ var
+  Milliseconds1:Int64;
+  Milliseconds2:Int64;
+ begin
+  {}
+  {Get Milliseconds}
+  Milliseconds1:=(Time1 div TIME_TICKS_PER_MILLISECOND);
+  Milliseconds2:=(Time2 div TIME_TICKS_PER_MILLISECOND);
+
+  {Return Difference}
+  if Milliseconds1 > Milliseconds2 then
+   begin
+    Result:=Milliseconds1 - Milliseconds2;
+   end
+  else
+   begin
+    Result:=Milliseconds2 - Milliseconds1;
+   end;
+ end;
+
 var
  Current:Int64;
  Previous:Int64;
@@ -3077,23 +3785,29 @@ begin
  if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Update Time');
  {$ENDIF}
  
- {Get Time}
+ {Get Remote Time}
  Current:=Client.GetTime;
  if Current <> 0 then
   begin
    {$IFDEF NTP_DEBUG}
    if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Update Time: Get Time success');
-   if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Update Time:  Returned time is ' + DateTimeToStr(SystemFileTimeToDateTime(TFileTime(Current))));
+   if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Update Time:  Remote time is ' + Client.FormatTime(Current));
    {$ENDIF}
 
-   {Check Time}
+   {Get Local Time}
    Previous:=ClockGetTime;
-   if WholeSeconds(Current) <> WholeSeconds(Previous) then
+
+   {$IFDEF NTP_DEBUG}
+   if SERVICE_LOG_ENABLED then ServiceLogDebug('NTP Update Time:  Local time is ' + Client.FormatTime(Previous));
+   {$ENDIF}
+
+   {Compare Time}
+   if MillisecondsDifference(Previous,Current) >= Client.ClockTolerance then
     begin
      {Set Time}
      ClockSetTime(Current,True);
      
-     if SERVICE_LOG_ENABLED then ServiceLogInfo('NTP: Setting time to ' + DateTimeToStr(SystemFileTimeToDateTime(TFileTime(Current))) + ' (from ' + DateTimeToStr(SystemFileTimeToDateTime(TFileTime(Previous))) + ')');
+     if SERVICE_LOG_ENABLED then ServiceLogInfo('NTP: Setting time to ' + Client.FormatTime(Current) + ' (from ' + Client.FormatTime(Previous) + ')');
     end; 
    
    {Set Initial Clock}
@@ -3131,8 +3845,12 @@ begin
      {Increment Clock Count}
      Client.IncrementInitialClockCount;
      
-     {Schedule Worker}
-     WorkerSchedule(Client.RetryTimeout * Min(Client.InitialClockCount,10),TWorkerTask(NTPUpdateTime),Client,nil);
+     {Check Retry}
+     if Client.InitialClockRetry then
+      begin
+       {Schedule Worker}
+       WorkerSchedule(Client.RetryTimeout * Min(Client.InitialClockCount,10),TWorkerTask(NTPUpdateTime),Client,nil);
+      end; 
     end;
   end;  
 end; 
@@ -3455,7 +4173,8 @@ end;
 {==============================================================================}
 
 function NTPTimestampAdd(const Timestamp1,Timestamp2:TNTPTimestamp):TNTPTimestamp;
-{Note: Expects Timestamp to be in Host order}
+{Note: Expects Timestamp to be in Network order}
+{Note: Returns Timestamp in Network order}
 begin
  {}
  Result.Seconds:=BEToN(Timestamp1.Seconds) + BEToN(Timestamp2.Seconds);
@@ -3469,7 +4188,8 @@ end;
 {==============================================================================}
 
 function NTPTimestampSubtract(const Timestamp1,Timestamp2:TNTPTimestamp):TNTPTimestamp;
-{Note: Expects Timestamp to be in Host order}
+{Note: Expects Timestamp to be in Network order}
+{Note: Returns Timestamp in Network order}
 begin
  {}
  Result.Seconds:=BEToN(Timestamp1.Seconds) - BEToN(Timestamp2.Seconds);
@@ -3482,8 +4202,31 @@ end;
 
 {==============================================================================}
 
+function NTPTimestampDivide(const Timestamp:TNTPTimestamp;Divisor:LongWord):TNTPTimestamp;
+{Note: Expects Timestamp to be in Network order}
+{Note: Returns Timestamp in Network order}
+begin
+ {}
+ Result.Seconds:=0;
+ Result.Fraction:=0;
+ 
+ {Check Divisor}
+ if Divisor = 0 then Exit;
+ 
+ Result.Seconds:=BEToN(Timestamp.Seconds) div Divisor;
+ Result.Fraction:=BEToN(Timestamp.Fraction) div Divisor;
+ 
+ {Swap Endian}
+ Result.Seconds:=NToBE(Result.Seconds);
+ Result.Fraction:=NToBE(Result.Fraction);
+end;
+ 
+{==============================================================================}
+
 function ClockTimeToNTPTimestamp(const Time:Int64):TNTPTimestamp;
-{Note: Returns Timestamp in Host order}
+{Note: Returns Timestamp in Network order}
+var
+ Microseconds:Int64;
 begin
  {}
  Result.Seconds:=0;
@@ -3492,24 +4235,55 @@ begin
  {Check Time}
  if Time < NTP_TIMESTAMP_START then Exit;
  
- {Calculate Timestamp}
+ {Calculate Timestamp Seconds}
  Result.Seconds:=(Time - NTP_TIMESTAMP_START) div TIME_TICKS_PER_SECOND;
  
- {Swap Endian}
+ {Calculate Timestamp Fraction}
+ Microseconds:=((Time - NTP_TIMESTAMP_START) mod TIME_TICKS_PER_SECOND) div TIME_TICKS_PER_MICROSECOND;
+ Result.Fraction:=(Microseconds shl 32) div MICROSECONDS_PER_SECOND; {Fraction is units of 1/2^32 of a second}
+ 
+ {Change to Network order}
  Result.Seconds:=NToBE(Result.Seconds);
+ Result.Fraction:=NToBE(Result.Fraction);
 end;
 
 {==============================================================================}
 
 function NTPTimestampToClockTime(const Timestamp:TNTPTimestamp):Int64;
-{Note: Expects Timestamp to be in Host order}
+{Note: Expects Timestamp to be in Network order}
+var
+ Seconds:Int64;
+ Microseconds:Int64;
 begin
  {}
- {Swap Endian}
- Result:=BEToN(Timestamp.Seconds); {Avoid 32 bit overflow}
+ {Get Seconds}
+ Seconds:=BEToN(Timestamp.Seconds); {Avoid 32 bit overflow}
+ 
+ {Get Microseconds}
+ Microseconds:=BEToN(Timestamp.Fraction); {Avoid 32 bit overflow}
+ Microseconds:=(Microseconds * MICROSECONDS_PER_SECOND) shr 32; {Fraction is units of 1/2^32 of a second}
  
  {Calculate Time}
- Result:=(Result * TIME_TICKS_PER_SECOND) + NTP_TIMESTAMP_START;
+ Result:=(Seconds * TIME_TICKS_PER_SECOND) + (Microseconds * TIME_TICKS_PER_MICROSECOND) + NTP_TIMESTAMP_START;
+end;
+
+{==============================================================================}
+
+function NTPTimestampToString(const Timestamp:TNTPTimestamp):String;
+{Note: Expects Timestamp to be in Network order}
+var
+ Seconds:Int64;
+ Microseconds:Int64;
+begin
+ {}
+ {Get Seconds}
+ Seconds:=BEToN(Timestamp.Seconds); {Avoid 32 bit overflow}
+ 
+ {Get Microseconds}
+ Microseconds:=BEToN(Timestamp.Fraction); {Avoid 32 bit overflow}
+ Microseconds:=(Microseconds * MICROSECONDS_PER_SECOND) shr 32; {Fraction is units of 1/2^32 of a second}
+ 
+ Result:=IntToHex(BEToN(Timestamp.Seconds),8) + ' / ' + IntToHex(BEToN(Timestamp.Fraction),8) + ' (Seconds = ' + IntToStr(Seconds) + ' / Microseconds = ' + IntToStr(Microseconds) + ')';
 end;
 
 {==============================================================================}
@@ -3607,44 +4381,49 @@ begin
  Result:=SYSLOG_FACILITY_USER;
  
  case Facility of
-  LOGGING_FACILITY_KERNEL:Result:=SYSLOG_FACILITY_KERNEL;
-  LOGGING_FACILITY_PLATFORM:Result:=SYSLOG_FACILITY_KERNEL;
+  LOGGING_FACILITY_KERNEL,
+  LOGGING_FACILITY_PLATFORM,
   LOGGING_FACILITY_THREADS:Result:=SYSLOG_FACILITY_KERNEL;
-  LOGGING_FACILITY_DEVICES:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_NETWORK:Result:=SYSLOG_FACILITY_SYSTEM; 
-  LOGGING_FACILITY_STORAGE:Result:=SYSLOG_FACILITY_SYSTEM; 
-  LOGGING_FACILITY_FILESYSTEM:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_KEYBOARD:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_MOUSE:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_SCSI:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_DMA:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_GPIO:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_MMC:Result:=SYSLOG_FACILITY_SYSTEM; 
-  LOGGING_FACILITY_USB:Result:=SYSLOG_FACILITY_SYSTEM; 
-  LOGGING_FACILITY_SERVICES:Result:=SYSLOG_FACILITY_SYSTEM;
+  LOGGING_FACILITY_DEVICES,
+  LOGGING_FACILITY_NETWORK,
+  LOGGING_FACILITY_STORAGE,
+  LOGGING_FACILITY_FILESYSTEM,
+  LOGGING_FACILITY_KEYBOARD,
+  LOGGING_FACILITY_MOUSE,
+  LOGGING_FACILITY_SCSI,
+  LOGGING_FACILITY_DMA,
+  LOGGING_FACILITY_GPIO,
+  LOGGING_FACILITY_MMC,
+  LOGGING_FACILITY_USB,
+  LOGGING_FACILITY_SERVICES,
   LOGGING_FACILITY_HTTP:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_IMAP:Result:=SYSLOG_FACILITY_MAIL;  
-  LOGGING_FACILITY_POP:Result:=SYSLOG_FACILITY_MAIL; 
+  LOGGING_FACILITY_IMAP,
+  LOGGING_FACILITY_POP,
   LOGGING_FACILITY_SMTP:Result:=SYSLOG_FACILITY_MAIL; 
-  LOGGING_FACILITY_TELNET:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_SSH:Result:=SYSLOG_FACILITY_SYSTEM;
+  LOGGING_FACILITY_TELNET,
+  LOGGING_FACILITY_SSH,
   LOGGING_FACILITY_SHELL:Result:=SYSLOG_FACILITY_SYSTEM;
   LOGGING_FACILITY_NTP:Result:=SYSLOG_FACILITY_NTP;
   LOGGING_FACILITY_FTP:Result:=SYSLOG_FACILITY_FTP;
-  LOGGING_FACILITY_RTC:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_I2C:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_I2S:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_PWM:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_SERIAL:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_SPI:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_UART:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_AUDIO:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_1WIRE:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_TOUCH:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_VIDEO:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_CODEC:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_NFS:Result:=SYSLOG_FACILITY_SYSTEM;
-  LOGGING_FACILITY_RPC:Result:=SYSLOG_FACILITY_SYSTEM;
+  LOGGING_FACILITY_RTC,
+  LOGGING_FACILITY_I2C,
+  LOGGING_FACILITY_I2S,
+  LOGGING_FACILITY_PWM,
+  LOGGING_FACILITY_SERIAL,
+  LOGGING_FACILITY_SPI,
+  LOGGING_FACILITY_UART,
+  LOGGING_FACILITY_AUDIO,
+  LOGGING_FACILITY_1WIRE,
+  LOGGING_FACILITY_TOUCH,
+  LOGGING_FACILITY_VIDEO,
+  LOGGING_FACILITY_CODEC,
+  LOGGING_FACILITY_NFS,
+  LOGGING_FACILITY_RPC,
+  LOGGING_FACILITY_PCI,
+  LOGGING_FACILITY_VIRTIO,
+  LOGGING_FACILITY_BLUETOOTH,
+  LOGGING_FACILITY_JOYSTICK,
+  LOGGING_FACILITY_HID:Result:=SYSLOG_FACILITY_SYSTEM;
   
   LOGGING_FACILITY_USER:Result:=SYSLOG_FACILITY_USER; 
  end;

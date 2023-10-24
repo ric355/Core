@@ -1,7 +1,7 @@
 {
 Ultibo Serial interface unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2022 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -331,6 +331,8 @@ function SerialLoggingStop(Logging:PLoggingDevice):LongWord;
 
 function SerialLoggingOutput(Logging:PLoggingDevice;const Data:String):LongWord;
 
+function SerialLoggingSetTarget(Logging:PLoggingDevice;const Target:String):LongWord;
+
 {==============================================================================}
 {RTL Text IO Functions}
 function SysTextIOReadChar(var ACh:Char;AUserData:Pointer):Boolean;
@@ -349,9 +351,9 @@ function SysSerialWrite(Buffer:Pointer;Size:LongWord;var Count:LongWord):LongWor
 
 {==============================================================================}
 {Serial Helper Functions}
-function SerialGetCount:LongWord; inline;
+function SerialGetCount:LongWord;
 
-function SerialDeviceGetDefault:PSerialDevice; inline;
+function SerialDeviceGetDefault:PSerialDevice;
 function SerialDeviceSetDefault(Serial:PSerialDevice):LongWord; 
 
 function SerialDeviceCheck(Serial:PSerialDevice):PSerialDevice;
@@ -374,8 +376,8 @@ procedure SerialLogWarn(Serial:PSerialDevice;const AText:String); inline;
 procedure SerialLogError(Serial:PSerialDevice;const AText:String); inline;
 procedure SerialLogDebug(Serial:PSerialDevice;const AText:String); inline;
 
-function SerialDataBitsToString(Parity:LongWord):String;
-function SerialStopBitsToString(Parity:LongWord):String;
+function SerialDataBitsToString(Bits:LongWord):String;
+function SerialStopBitsToString(Bits:LongWord):String;
 function SerialParityToString(Parity:LongWord):String;
 function SerialFlowControlToString(Flow:LongWord):String;
 
@@ -1640,6 +1642,70 @@ begin
 end;
 
 {==============================================================================}
+
+function SerialLoggingSetTarget(Logging:PLoggingDevice;const Target:String):LongWord;
+{Implementation of LoggingDeviceSetTarget API for Serial Logging}
+{Note: Not intended to be called directly by applications, use LoggingDeviceSetTarget instead}
+var
+ Serial:PSerialDevice;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {Check Logging}
+ if Logging = nil then Exit;
+ if Logging.Device.Signature <> DEVICE_SIGNATURE then Exit; 
+
+ if MutexLock(Logging.Lock) = ERROR_SUCCESS then 
+  begin
+   try
+    {Check Logging}
+    if Logging.Device.Signature <> DEVICE_SIGNATURE then Exit;
+
+    {Check Target}
+    if Logging.Target <> Target then
+     begin
+      {Check Name}
+      Serial:=SerialDeviceFindByName(Target);
+      if Serial = nil then
+       begin
+        {Check Description}
+        Serial:=SerialDeviceFindByDescription(Target);
+       end;
+
+      {Check Device}
+      if Serial = nil then Exit;
+
+      {Close Serial}
+      SerialDeviceClose(PSerialLogging(Logging).Serial);
+
+      {Set Target}
+      Logging.Target:=Target;
+      UniqueString(Logging.Target);
+
+      {Update Parameters}
+      PSerialLogging(Logging).Serial:=Serial;
+      PSerialLogging(Logging).FlowControl:=SERIAL_FLOW_NONE;
+      SerialLoggingDeviceParameters(Serial,SERIAL_LOGGING_PARAMETERS,PSerialLogging(Logging).BaudRate,PSerialLogging(Logging).Parity,PSerialLogging(Logging).DataBits,PSerialLogging(Logging).StopBits);
+
+      {Open Serial}
+      Result:=SerialDeviceOpen(PSerialLogging(Logging).Serial,PSerialLogging(Logging).BaudRate,PSerialLogging(Logging).DataBits,PSerialLogging(Logging).StopBits,PSerialLogging(Logging).Parity,PSerialLogging(Logging).FlowControl,0,0);
+      if Result <> ERROR_SUCCESS then Exit;
+     end;
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   finally
+    MutexUnlock(Logging.Lock);
+   end;
+  end
+ else
+  begin
+   Result:=ERROR_CAN_NOT_COMPLETE;
+  end;
+end;
+
+{==============================================================================}
 {==============================================================================}
 {RTL Text IO Functions}
 function SysTextIOReadChar(var ACh:Char;AUserData:Pointer):Boolean;
@@ -1766,7 +1832,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {Serial Helper Functions}
-function SerialGetCount:LongWord; inline;
+function SerialGetCount:LongWord;
 {Get the current Serial count}
 begin
  {}
@@ -1775,7 +1841,7 @@ end;
 
 {==============================================================================}
 
-function SerialDeviceGetDefault:PSerialDevice; inline;
+function SerialDeviceGetDefault:PSerialDevice;
 {Get the current default Serial device}
 begin
  {}
@@ -2147,12 +2213,12 @@ end;
 
 {==============================================================================}
 
-function SerialDataBitsToString(Parity:LongWord):String;
+function SerialDataBitsToString(Bits:LongWord):String;
 begin
  {}
  Result:='SERIAL_DATA_UNKNOWN';
  
- case Parity of
+ case Bits of
   SERIAL_DATA_8BIT:Result:='SERIAL_DATA_8BIT';
   SERIAL_DATA_7BIT:Result:='SERIAL_DATA_7BIT';
   SERIAL_DATA_6BIT:Result:='SERIAL_DATA_6BIT';
@@ -2162,12 +2228,12 @@ end;
 
 {==============================================================================}
 
-function SerialStopBitsToString(Parity:LongWord):String;
+function SerialStopBitsToString(Bits:LongWord):String;
 begin
  {}
  Result:='SERIAL_STOP_UNKNOWN';
  
- case Parity of
+ case Bits of
   SERIAL_STOP_1BIT:Result:='SERIAL_STOP_1BIT';
   SERIAL_STOP_2BIT:Result:='SERIAL_STOP_2BIT';
   SERIAL_STOP_1BIT5:Result:='SERIAL_STOP_1BIT5';
@@ -2217,9 +2283,26 @@ begin
  {Check Logging}
  if LoggingDeviceFindByDevice(@Serial.Device) = nil then
   begin
-   {Create Logging}
+   {Check Register}
    if SERIAL_REGISTER_LOGGING then
     begin
+     {Check Device}
+     if Length(SERIAL_LOGGING_DEVICE) <> 0 then
+      begin
+       {Check Name}
+       if SerialDeviceFindByName(SERIAL_LOGGING_DEVICE) <> Serial then
+        begin
+         {Check Description}
+         if SerialDeviceFindByDescription(SERIAL_LOGGING_DEVICE) <> Serial then Exit;
+        end;
+      end
+     else
+      begin
+       {Check Default}
+       if SerialDeviceGetDefault <> Serial then Exit;
+      end;
+
+     {Create Logging}
      Logging:=PSerialLogging(LoggingDeviceCreateEx(SizeOf(TSerialLogging),SERIAL_LOGGING_DEFAULT));
      if Logging <> nil then
       begin
@@ -2235,6 +2318,8 @@ begin
        Logging.Logging.DeviceStart:=SerialLoggingStart;
        Logging.Logging.DeviceStop:=SerialLoggingStop;
        Logging.Logging.DeviceOutput:=SerialLoggingOutput;
+       Logging.Logging.DeviceSetTarget:=SerialLoggingSetTarget;
+       Logging.Logging.Target:=DeviceGetName(@Serial.Device);
        {Serial}
        Logging.Serial:=Serial;
        Logging.FlowControl:=SERIAL_FLOW_NONE;

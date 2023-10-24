@@ -1,7 +1,7 @@
 {
 Ultibo Network interface unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -867,6 +867,7 @@ type
    function WriterLock:Boolean;
    function WriterUnlock:Boolean;
    function WriterConvert:Boolean;
+   function WriterOwner:Boolean;
  end;
  
  TAdapterThread = class;
@@ -1299,10 +1300,10 @@ function SysHostSetDomain(const ADomain:String):Boolean;
 
 {==============================================================================}
 {Network Helper Functions}
-function NetworkGetLastError:LongInt; inline;
-procedure NetworkSetLastError(Error:LongInt); inline;
+function NetworkGetLastError:LongInt;
+procedure NetworkSetLastError(Error:LongInt);
 
-function NetworkGetCount:LongWord; inline;
+function NetworkGetCount:LongWord;
 
 function NetworkDeviceCheck(Network:PNetworkDevice):PNetworkDevice;
 
@@ -2154,6 +2155,15 @@ function TNetworkList.WriterConvert:Boolean;
 begin
  {}
  Result:=(SynchronizerWriterConvert(FLock) = ERROR_SUCCESS);
+end;
+
+{==============================================================================}
+
+function TNetworkList.WriterOwner:Boolean;
+{Return True if the current thread is the writer owner}
+begin
+ {}
+ Result:=(SynchronizerWriterOwner(FLock) = GetCurrentThreadID);
 end;
 
 {==============================================================================}
@@ -4355,7 +4365,10 @@ begin
    begin
     {Terminate Thread}
     FThread.Terminate;
-  
+
+    {Release Thread (In future override TerminatedSet method in TAdapterThread)}
+    ThreadWake(FThread.Handle);
+
     {Wait For Thread}
     FThread.WaitFor;
   
@@ -5926,7 +5939,7 @@ end;
 
 function NetworkBufferAllocate(Network:PNetworkDevice;var Entry:PNetworkEntry):LongWord;
 {Allocate a transmit buffer from the specified network device, the returned entry will
- include a buffer for writing data to as well as an offfset value to allow the driver
+ include a buffer for writing data to as well as an offset value to allow the driver
  data to be written to the start of the buffer.
  
  When the data has been copied to the buffer, pass the entry to NetworkBufferTransmit}
@@ -6562,7 +6575,7 @@ end;
 {==============================================================================}
 
 function NetworkEventRelease(Event:PNetworkEvent):LongWord;
-{Deregister and Destroy a Event from the Event table}
+{Deregister and Destroy an Event from the Event table}
 var
  Prev:PNetworkEvent;
  Next:PNetworkEvent;
@@ -6812,7 +6825,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {Network Helper Functions}
-function NetworkGetLastError:LongInt; inline;
+function NetworkGetLastError:LongInt;
 {Get the last network error value for the current Thread}
 {Return: Last Network Error or ERROR_SUCCESS if no error}
 begin
@@ -6822,7 +6835,7 @@ end;
 
 {==============================================================================}
 
-procedure NetworkSetLastError(Error:LongInt); inline;
+procedure NetworkSetLastError(Error:LongInt);
 {Set the last network error value for the current Thread}
 begin
  {}
@@ -6831,7 +6844,7 @@ end;
 
 {==============================================================================}
 
-function NetworkGetCount:LongWord; inline;
+function NetworkGetCount:LongWord;
 {Get the current network count}
 begin
  {}

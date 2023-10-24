@@ -106,10 +106,15 @@ begin
   if ResumeThread(FHandle) = 0 then FSuspended := False;
 end;
 
+{$if defined(FPC_STABLE) or defined(FPC_FIXES) or defined(FPC_LEGACY)}
 procedure TThread.Terminate;
 begin
   FTerminated := True;
+  {$ifndef FPC_LEGACY}
+  TerminatedSet;
+  {$endif}
 end;
+{$endif}
 
 function TThread.WaitFor: Integer;
 begin

@@ -1,7 +1,7 @@
 {
 ARM PrimeCell PL050 PS2 Keyboard/Mouse Interface Driver.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2022 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -196,7 +196,7 @@ function PL050MouseDestroy(Mouse:PMouseDevice):LongWord;
  
 {==============================================================================}
 {PL050 Keyboard Functions}
-function PL050KeyboardControl(Keyboard:PKeyboardDevice;Request:Integer;Argument1:LongWord;var Argument2:LongWord):LongWord;
+function PL050KeyboardControl(Keyboard:PKeyboardDevice;Request:Integer;Argument1:PtrUInt;var Argument2:PtrUInt):LongWord;
 
 procedure PL050KeyboardInterruptHandler(Keyboard:PKeyboardDevice);
 
@@ -204,7 +204,7 @@ procedure PL050KeyboardWorker(Scancode:PPL050KeyboardScancode);
 
 {==============================================================================}
 {PL050 Mouse Functions}
-function PL050MouseControl(Mouse:PMouseDevice;Request:Integer;Argument1:LongWord;var Argument2:LongWord):LongWord;
+function PL050MouseControl(Mouse:PMouseDevice;Request:Integer;Argument1:PtrUInt;var Argument2:PtrUInt):LongWord;
  
 procedure PL050MouseInterruptHandler(Mouse:PMouseDevice);
 
@@ -485,6 +485,8 @@ begin
    {Mouse}
    PL050Mouse.Mouse.MouseState:=MOUSE_STATE_ATTACHING;
    PL050Mouse.Mouse.DeviceControl:=PL050MouseControl;
+   {Driver}
+   PL050Mouse.Mouse.Properties.MaxButtons:=MOUSE_LEFT_BUTTON or MOUSE_RIGHT_BUTTON or MOUSE_MIDDLE_BUTTON;
    {PL050}
    PL050Mouse.IRQ:=IRQ;
    PL050Mouse.Registers:=PPL050KMIRegisters(Address);
@@ -610,7 +612,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {PL050 Keyboard Functions}
-function PL050KeyboardControl(Keyboard:PKeyboardDevice;Request:Integer;Argument1:LongWord;var Argument2:LongWord):LongWord;
+function PL050KeyboardControl(Keyboard:PKeyboardDevice;Request:Integer;Argument1:PtrUInt;var Argument2:PtrUInt):LongWord;
 {Implementation of KeyboardDeviceControl API for PL050 Keyboard}
 {Note: Not intended to be called directly by applications, use KeyboardDeviceControl instead}
 var
@@ -633,10 +635,10 @@ begin
     case Request of
      KEYBOARD_CONTROL_GET_FLAG:begin
        {Get Flag}
-       LongBool(Argument2):=False;
+       Argument2:=Ord(False);
        if (Keyboard.Device.DeviceFlags and Argument1) <> 0 then
         begin
-         LongBool(Argument2):=True;
+         Argument2:=Ord(True);
          
          {Return Result}
          Result:=ERROR_SUCCESS;
@@ -687,10 +689,10 @@ begin
       end;
      KEYBOARD_CONTROL_GET_LED:begin
        {Get LED}
-       LongBool(Argument2):=False;
+       Argument2:=Ord(False);
        if (Keyboard.KeyboardLEDs and Argument1) <> 0 then
         begin
-         LongBool(Argument2):=True;
+         Argument2:=Ord(True);
          
          {Return Result}
          Result:=ERROR_SUCCESS;
@@ -927,6 +929,9 @@ begin
         
         {Get LEDs}
         LEDs:=Keyboard.Keyboard.KeyboardLEDs;
+
+        {Clear Keyboard Data}
+        FillChar(Data,SizeOf(TKeyboardData),0);
         
         {Get ScanCode}
         if PS2KeyboardScancodeToScanCode(@Scancode.Scancode,Scancode.Index,Data.ScanCode) = ERROR_SUCCESS then
@@ -1306,7 +1311,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {PL050 Mouse Functions}
-function PL050MouseControl(Mouse:PMouseDevice;Request:Integer;Argument1:LongWord;var Argument2:LongWord):LongWord;
+function PL050MouseControl(Mouse:PMouseDevice;Request:Integer;Argument1:PtrUInt;var Argument2:PtrUInt):LongWord;
 {Implementation of MouseDeviceControl API for PL050 Mouse}
 {Note: Not intended to be called directly by applications, use MouseDeviceControl instead}
 var
@@ -1329,10 +1334,10 @@ begin
     case Request of
      MOUSE_CONTROL_GET_FLAG:begin
        {Get Flag}
-       LongBool(Argument2):=False;
+       Argument2:=Ord(False);
        if (Mouse.Device.DeviceFlags and Argument1) <> 0 then
         begin
-         LongBool(Argument2):=True;
+         Argument2:=Ord(True);
          
          {Return Result}
          Result:=ERROR_SUCCESS;
@@ -1343,9 +1348,10 @@ begin
        if (Argument1 and not(MOUSE_FLAG_MASK)) = 0 then
         begin
          Mouse.Device.DeviceFlags:=(Mouse.Device.DeviceFlags or Argument1);
-       
-         {Return Result}
-         Result:=ERROR_SUCCESS;
+         Mouse.Properties.Flags:=Mouse.Device.DeviceFlags;
+
+         {Request Update}
+         Result:=MouseDeviceUpdate(Mouse);
         end; 
       end;
      MOUSE_CONTROL_CLEAR_FLAG:begin 
@@ -1353,9 +1359,10 @@ begin
        if (Argument1 and not(MOUSE_FLAG_MASK)) = 0 then
         begin
          Mouse.Device.DeviceFlags:=(Mouse.Device.DeviceFlags and not(Argument1));
-       
-         {Return Result}
-         Result:=ERROR_SUCCESS;
+         Mouse.Properties.Flags:=Mouse.Device.DeviceFlags;
+
+         {Request Update}
+         Result:=MouseDeviceUpdate(Mouse);
         end; 
       end;
      MOUSE_CONTROL_FLUSH_BUFFER:begin
@@ -1405,45 +1412,49 @@ begin
       end;
      MOUSE_CONTROL_GET_MAX_X:begin
        {Get Maximum X}
-       Argument2:=0;
+       Argument2:=Mouse.Properties.MaxX;
        
        {Return Result}
        Result:=ERROR_SUCCESS;
       end;       
      MOUSE_CONTROL_GET_MAX_Y:begin
        {Get Maximum Y}
-       Argument2:=0;
+       Argument2:=Mouse.Properties.MaxY;
        
        {Return Result}
        Result:=ERROR_SUCCESS;
       end;       
      MOUSE_CONTROL_GET_MAX_WHEEL:begin
        {Get Maximum Wheel}
-       Argument2:=0;
+       Argument2:=Mouse.Properties.MaxWheel;
        
        {Return Result}
        Result:=ERROR_SUCCESS;
       end;       
      MOUSE_CONTROL_GET_MAX_BUTTONS:begin
        {Get Maximum Buttons mask}
-       Argument2:=MOUSE_LEFT_BUTTON or MOUSE_RIGHT_BUTTON or MOUSE_MIDDLE_BUTTON;
+       Argument2:=Mouse.Properties.MaxButtons;
        
        {Return Result}
        Result:=ERROR_SUCCESS;
       end;   
      MOUSE_CONTROL_GET_ROTATION:begin
        {Get Rotation}
-       Argument2:=MOUSE_ROTATION_0;
+       Argument2:=Mouse.Properties.Rotation;
        
        {Return Result}
        Result:=ERROR_SUCCESS;
       end;
      MOUSE_CONTROL_SET_ROTATION:begin
        {Set Rotation}
-       {Not Supported}
-       
-       {Return Result}
-       Result:=ERROR_NOT_SUPPORTED;
+       case MouseDeviceResolveRotation(Argument1) of
+        MOUSE_ROTATION_0,MOUSE_ROTATION_90,MOUSE_ROTATION_180,MOUSE_ROTATION_270:begin
+          Mouse.Properties.Rotation:=Argument1;
+
+          {Request Update}
+          Result:=MouseDeviceUpdate(Mouse);
+         end;
+       end;
       end;
     end;
    finally
@@ -1553,8 +1564,7 @@ procedure PL050MouseWorker(Packet:PPL050MousePacket);
 var
  Status:LongWord;
  Mouse:PPL050Mouse;
- LocalData:PMouseData;
- GlobalData:TMouseData;
+ MouseData:TMouseData;
 begin
  {}
  {Check Packet}
@@ -1579,68 +1589,18 @@ begin
       {Check Packet}
       if Packet.Count >= 3 then
        begin
-        {Check Flags}
-        if (Mouse.Mouse.Device.DeviceFlags and MOUSE_FLAG_DIRECT_READ) = 0 then
-         begin
-          {Global Buffer}
-          {Convert Packet}
-          if PS2MousePacketToMouseData(@Packet.Packet,@GlobalData,Mouse.Mouse.Device.DeviceFlags) = ERROR_SUCCESS then
-           begin
-            {$IF DEFINED(PL050_DEBUG) or DEFINED(MOUSE_DEBUG)}
-            if MOUSE_LOG_ENABLED then MouseLogDebug(@Packet.Mouse.Mouse,'PL050: Mouse Data (Buttons=' + IntToHex(GlobalData.Buttons,8) + ' OffsetX=' + IntToStr(GlobalData.OffsetX) + ' OffsetY=' + IntToStr(GlobalData.OffsetY) + ')');
-            {$ENDIF}
-            
-            Status:=MouseWrite(@GlobalData,SizeOf(TMouseData),1);
-            if Status <> ERROR_SUCCESS then
-             begin
-              if Status = ERROR_INSUFFICIENT_BUFFER then
-               begin
-                if MOUSE_LOG_ENABLED then MouseLogError(@Mouse.Mouse,'Mouse: Buffer overflow, packet discarded'); 
-                
-                {Update Statistics}
-                Inc(Mouse.Mouse.BufferOverruns); 
-               end
-              else
-               begin
-                if MOUSE_LOG_ENABLED then MouseLogError(@Mouse.Mouse,'Mouse: Buffer error, packet discarded'); 
-                
-                {Update Statistics}
-                Inc(Mouse.Mouse.ReceiveErrors); 
-               end;               
-             end;
-           end;
-         end
-        else
-         begin              
-          {Direct Buffer}
-          {Check Buffer}
-          if (Mouse.Mouse.Buffer.Count < MOUSE_BUFFER_SIZE) then
-           begin
-            LocalData:=@Mouse.Mouse.Buffer.Buffer[(Mouse.Mouse.Buffer.Start + Mouse.Mouse.Buffer.Count) mod MOUSE_BUFFER_SIZE];
-            if LocalData <> nil then
-             begin
-              {Convert Packet}
-              if PS2MousePacketToMouseData(@Packet.Packet,LocalData,Mouse.Mouse.Device.DeviceFlags) = ERROR_SUCCESS then
-               begin
-                {$IF DEFINED(PL050_DEBUG) or DEFINED(MOUSE_DEBUG)}
-                if MOUSE_LOG_ENABLED then MouseLogDebug(@Packet.Mouse.Mouse,'PL050: Mouse Data (Buttons=' + IntToHex(LocalData.Buttons,8) + ' OffsetX=' + IntToStr(LocalData.OffsetX) + ' OffsetY=' + IntToStr(LocalData.OffsetY) + ')');
-                {$ENDIF}
-               
-                {Update Count}
-                Inc(Mouse.Mouse.Buffer.Count);
-            
-                {Signal Data Received}
-                SemaphoreSignal(Mouse.Mouse.Buffer.Wait);
-               end; 
-             end; 
-           end
-          else
-           begin
-            if MOUSE_LOG_ENABLED then MouseLogError(@Mouse.Mouse,'Mouse: Buffer overflow, packet discarded'); 
+        {Clear Mouse Data}
+        FillChar(MouseData,SizeOf(TMouseData),0);
 
-            {Update Statistics}
-            Inc(Mouse.Mouse.BufferOverruns); 
-           end;                           
+        {Convert Packet}
+        if PS2MousePacketToMouseData(@Packet.Packet,@MouseData,Mouse.Mouse.Device.DeviceFlags,Mouse.Mouse.Properties.Rotation) = ERROR_SUCCESS then
+         begin
+          {$IF DEFINED(PL050_DEBUG) or DEFINED(MOUSE_DEBUG)}
+          if MOUSE_LOG_ENABLED then MouseLogDebug(@Packet.Mouse.Mouse,'PL050: Mouse Data (Buttons=' + IntToHex(MouseData.Buttons,8) + ' OffsetX=' + IntToStr(MouseData.OffsetX) + ' OffsetY=' + IntToStr(MouseData.OffsetY) + ')');
+          {$ENDIF}
+
+          {Insert Data}
+          MouseInsertData(@Mouse.Mouse,@MouseData,True);
          end;
        end
       else

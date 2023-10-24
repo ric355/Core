@@ -1,7 +1,7 @@
 {
 Ultibo QEMU VersatilePB unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2022 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -83,6 +83,10 @@ uses GlobalConfig,
      Mouse,
      PS2,
      PL050,        {ARM PrimeCell PL050 PS2 Keyboard/Mouse driver}
+     HID,
+     USBHID,
+     HIDKeyboard,
+     HIDMouse,
      Filesystem,
      EXTFS,
      FATFS,
@@ -162,7 +166,6 @@ begin
  //PL08XDMA_CACHE_COHERENT:=DMA_CACHE_COHERENT;
  
  {Initialize Peripherals}
- PL18X_MMCI_FIQ_ENABLED:=False;
  PL18X_MMCI_MAX_FREQ:=VERSATILEPB_SYS_24MHZ_FREQUENCY; {Connected to the 24MHz reference clock}
  
  {Check Environment Variables}

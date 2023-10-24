@@ -1,7 +1,7 @@
 {
 Ultibo TCP (Transmission Control Protocol) unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -1386,11 +1386,13 @@ begin
      TTCPOptions(Result.ProtocolOptions).NoSack:=TTCPOptions(ASocket.ProtocolOptions).NoSack;
      
      {Copy the Send Buffer Options}
+     Result.SendData.Size:=ASocket.SendData.Size;
      Result.SendData.NoPush:=ASocket.SendData.NoPush;
      Result.SendData.NoSack:=ASocket.SendData.NoSack;
      Result.SendData.NoNagle:=ASocket.SendData.NoNagle;
      
      {Copy the Recv Buffer Options}
+     Result.RecvData.Size:=ASocket.RecvData.Size;
      Result.RecvData.MaxSeg:=ASocket.RecvData.MaxSeg;
      Result.RecvData.WindowScale:=ASocket.RecvData.WindowScale;
      Result.RecvData.NoSack:=ASocket.RecvData.NoSack;
@@ -2527,7 +2529,7 @@ begin
             end;
 
            {Check for Timeout}
-           if GetTickCount64 > (StartTime + ATimeout) then
+           if GetTickCount64 >= (StartTime + ATimeout) then
             begin
              {Return Error}
              Result:=SOCKET_ERROR;
@@ -2583,7 +2585,7 @@ begin
             end;
 
            {Check for Timeout}
-           if GetTickCount64 > (StartTime + ATimeout) then
+           if GetTickCount64 >= (StartTime + ATimeout) then
             begin
              {Return Error}
              Result:=SOCKET_ERROR;
@@ -2637,7 +2639,7 @@ begin
           end;
 
          {Check for Timeout}
-         if GetTickCount64 > (StartTime + ATimeout) then
+         if GetTickCount64 >= (StartTime + ATimeout) then
           begin
            {Return Error}
            Result:=SOCKET_ERROR;
@@ -2689,7 +2691,7 @@ begin
           end;
 
          {Check for Timeout}
-         if GetTickCount64 > (StartTime + ATimeout) then
+         if GetTickCount64 >= (StartTime + ATimeout) then
           begin
            {Return Error}
            Result:=SOCKET_ERROR;
@@ -3032,7 +3034,7 @@ begin
           end; 
          
          {Check for Timeout}
-         if GetTickCount64 > (ASocket.LingerTime + ASocket.SocketOptions.Linger.l_linger) then
+         if GetTickCount64 >= (ASocket.LingerTime + ASocket.SocketOptions.Linger.l_linger) then
           begin
            Break;
           end;
@@ -3179,7 +3181,7 @@ begin
                end; 
               
               {Check for Timeout}
-              if GetTickCount64 > (StartTime + ASocket.SocketOptions.ConnTimeout) then
+              if GetTickCount64 >= (StartTime + ASocket.SocketOptions.ConnTimeout) then
                begin
                 NetworkSetLastError(WSAETIMEDOUT);
                 Exit;
@@ -3321,7 +3323,7 @@ begin
                end; 
               
               {Check for Timeout}
-              if GetTickCount64 > (StartTime + ASocket.SocketOptions.ConnTimeout) then
+              if GetTickCount64 >= (StartTime + ASocket.SocketOptions.ConnTimeout) then
                begin
                 NetworkSetLastError(WSAETIMEDOUT);
                 Exit;
@@ -3734,7 +3736,7 @@ begin
           end; 
   
          {Check for Timeout}
-         if GetTickCount64 > (StartTime + ASocket.SocketOptions.RecvTimeout) then
+         if GetTickCount64 >= (StartTime + ASocket.SocketOptions.RecvTimeout) then
           begin
            NetworkSetLastError(WSAETIMEDOUT);
            Exit;
@@ -3874,7 +3876,7 @@ begin
            end; 
 
           {Check for Timeout}
-          if GetTickCount64 > (StartTime + ASocket.SocketOptions.SendTimeout) then
+          if GetTickCount64 >= (StartTime + ASocket.SocketOptions.SendTimeout) then
            begin
             NetworkSetLastError(WSAETIMEDOUT);
             Exit;
@@ -3939,7 +3941,7 @@ begin
            end; 
 
           {Check for Timeout}
-          if GetTickCount64 > (StartTime + ASocket.SocketOptions.SendTimeout) then
+          if GetTickCount64 >= (StartTime + ASocket.SocketOptions.SendTimeout) then
            begin
             NetworkSetLastError(WSAETIMEDOUT);
             Exit;
@@ -5096,6 +5098,8 @@ begin
  FRecvData.Size:=TCP_BUFFER_SIZE;
 
  {Set Socket Defaults}
+ FSocketOptions.SendBuffer:=TCP_BUFFER_SIZE;
+ FSocketOptions.RecvBuffer:=TCP_BUFFER_SIZE;
  FSocketOptions.SendTimeout:=TCP_TIMEOUT;
  FSocketOptions.RecvTimeout:=TCP_TIMEOUT;
 end;

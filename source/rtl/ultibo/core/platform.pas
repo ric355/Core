@@ -1,7 +1,7 @@
 {
 Ultibo Platform interface unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -138,6 +138,19 @@ const
  VECTOR_TABLE_ENTRY_ARM_FIQ       = 7; {ARM FIQ Vector}
  {AARCH64}
  
+ {Shutdown Flags}
+ SHUTDOWN_FLAG_NONE         = $00000000;
+ SHUTDOWN_FLAG_RESTART      = $00000001; {The system is shutting down and restarting}
+ SHUTDOWN_FLAG_FORCE        = $00000002; {Forced shutdown or restart requested, registered callbacks will be bypassed}
+
+ {Shutdown constants}
+ SHUTDOWN_SIGNATURE = $A73D8B0C;
+
+ SHUTDOWN_DEFAULT_DELAY = 1000;    {Default delay before starting a shutdown or restart (Milliseconds)}
+ SHUTDOWN_MINIMUM_DELAY = 10;      {Minimum delay before starting a shutdown or restart (Milliseconds)}
+
+ SHUTDOWN_DEFAULT_TIMEOUT = 5000;  {Default time to wait for a shutdown callback to complete before continuing (Milliseconds)}
+
  {Exception Types}
  EXCEPTION_TYPE_DATA_ABORT            = 1;
  EXCEPTION_TYPE_PREFETCH_ABORT        = 2;
@@ -148,9 +161,11 @@ const
  FIRMWARE_THROTTLE_UNDER_VOLTAGE       = (1 shl 0);  {Under voltage is occurring}
  FIRMWARE_THROTTLE_FREQUENCY_LIMIT     = (1 shl 1);  {Frequency limiting is occurring}
  FIRMWARE_THROTTLE_THROTTLED           = (1 shl 2);  {Throttling is occurring}
+ FIRMWARE_THROTTLE_SOFT_TEMP_LIMIT     = (1 shl 3);  {Soft temperature limit is active}
  FIRMWARE_THROTTLE_WAS_UNDER_VOLTAGE   = (1 shl 16); {Under voltage has occurred}
  FIRMWARE_THROTTLE_WAS_FREQUENCY_LIMIT = (1 shl 17); {Frequency limiting has occurred} 
  FIRMWARE_THROTTLE_WAS_THROTTLED       = (1 shl 18); {Throttling has occurred} 
+ FIRMWARE_THROTTLE_WAS_SOFT_TEMP_LIMIT = (1 shl 19); {Soft temperature limit has occurred}
  
  {Platform logging}
  PLATFORM_LOG_LEVEL_DEBUG     = LOG_LEVEL_DEBUG;  {Platform debugging messages}
@@ -296,26 +311,41 @@ type
   {Statistics Properties}
  end;
  
+ PHandleEntries = ^THandleEntries;
+ THandleEntries = array[0..HANDLE_TABLE_MASK + 1] of PHandleEntry;
+ 
  {Handle Table}
  PHandleTable = ^THandleTable;
  THandleTable = record
   Next:LongWord;                  {The next handle number}
   Count:LongWord;                 {The current handle count}
-  Handles:array of PHandleEntry;  {Array of handle entries hash buckets}
+  Handles:PHandleEntries;         {Array of handle entries hash buckets}
  end;
  
 type
+ {Prototype for Shutdown Callback}
+ TShutdownCallback = function(Flags:LongWord;Parameter:Pointer):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
+
  {Shutdown Entry}
  PShutdownEntry = ^TShutdownEntry;
  TShutdownEntry = record
   {Shutdown Properties}
-  Signature:LongWord;                    {Signature for entry validation}
-  Shutdown:procedure(Parameter:Pointer);{$IFDEF i386} stdcall;{$ENDIF} {The procedure to call on Shutdown}
-  Parameter:Pointer;                     {The parameter to pass to the Shutdown procedure (or nil)}
+  Signature:LongWord;             {Signature for entry validation}
+  Callback:TShutdownCallback;     {The procedure to call on Shutdown or Restart}
+  Parameter:Pointer;              {The parameter to pass to the Callback (or nil)}
+  Timeout:LongWord;               {The time to wait for the Callback to complete (or 0 to use the default timeout) (Milliseconds)}
   {Internal Properties}
-  Prev:PShutdownEntry;                   {Previous entry in Shutdown table}
-  Next:PShutdownEntry;                   {Next entry in Shutdown table}
+  Prev:PShutdownEntry;            {Previous entry in Shutdown table}
+  Next:PShutdownEntry;            {Next entry in Shutdown table}
  end; 
+
+ {Shutdown Data (Used internally by Shutdown or Restart)} 
+ PShutdownData = ^TShutdownData;
+ TShutdownData = record
+  Delay:LongWord;                 {Delay value requested for Shutdown or Restart (Milliseconds)}
+  Flags:LongWord;                 {Flags for requested Shutdown or Restart (eg SHUTDOWN_FLAG_RESTART)}
+  Entry:PShutdownEntry;           {The current shutdown entry being processed}
+ end;
  
 type 
  {Prototypes for Interrupt (IRQ/FIQ) Handlers}
@@ -444,7 +474,7 @@ type
  PPlatformSemaphore = ^TPlatformSemaphore;
  TPlatformSemaphore = record
   Semaphore:THandle;
-  WaitSemaphore:function(Handle:THandle):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
+  WaitSemaphore:function(Handle:THandle;Timeout:LongWord):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
   SignalSemaphore:function(Handle:THandle):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
  end; 
  
@@ -947,6 +977,7 @@ type
  TI2CSetAddress = function(Address:Word):LongWord;
  
  TI2CGetDescription = function(Id:LongWord):String;
+ TI2CSlaveGetDescription = function(Id:LongWord):String;
  
 type
  {Prototypes for PWM Handlers}
@@ -1170,6 +1201,7 @@ type
 type
  {Prototypes for Module Handlers}
  TModuleLoad = function(const AName:String):THandle;
+ TModuleLoadEx = function(const AName:String;AFlags:LongWord):THandle;
  TModuleUnload = function(AHandle:THandle):Boolean;
  TModuleGetName = function(AHandle:THandle):String;
  
@@ -1191,6 +1223,22 @@ type
   WriteChar:TTextIOWriteChar;
   ReadChar:TTextIOReadChar;
   UserData:Pointer;
+ end;
+ 
+type
+ {Platform Timer}
+ PPlatformTimer = ^TPlatformTimer;
+ TPlatformTimer = record
+  Data:Pointer;
+  CreateTimer:function(Interval:LongWord;Enabled,Reschedule:Boolean;Event:TTimerEvent;Data:Pointer):TTimerHandle;{$IFDEF i386} stdcall;{$ENDIF}
+ end;
+ 
+type
+ {Platform Worker}
+ PPlatformWorker = ^TPlatformWorker;
+ TPlatformWorker = record
+  Data:Pointer;
+  ScheduleWorker:function(Interval:LongWord;Task:TWorkerTask;Data:Pointer;Callback:TWorkerCallback):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
  end;
  
 {==============================================================================}
@@ -1245,12 +1293,17 @@ var
  VectorTableLock:TPlatformLock;
  HandleNameLock:TPlatformLock;
  HandleTableLock:TPlatformLock;
+ ShutdownTableLock:TPlatformLock;
  
  UtilityLock:TPlatformLock;
  
 var
  {Semaphore Variables}
  ShutdownSemaphore:TPlatformSemaphore;
+
+var
+ {Worker Variables}
+ ShutdownWorker:TPlatformWorker;
  
 var
  {Clock Variables}
@@ -1743,6 +1796,7 @@ var
  I2CSetAddressHandler:TI2CSetAddress;
  
  I2CGetDescriptionHandler:TI2CGetDescription;
+ I2CSlaveGetDescriptionHandler:TI2CSlaveGetDescription;
  
 var
  {PWM Handlers}
@@ -1965,6 +2019,7 @@ var
 var
  {Module Handlers}
  ModuleLoadHandler:TModuleLoad;
+ ModuleLoadExHandler:TModuleLoadEx;
  ModuleUnloadHandler:TModuleUnload;
  ModuleGetNameHandler:TModuleGetName;
  
@@ -2143,13 +2198,20 @@ function GetSystemCallEntry(Number:LongWord):TSystemCallEntry; inline;
 
 {==============================================================================}
 {System Functions}
-function SystemRestart(Delay:LongWord):LongWord; inline;
-function SystemShutdown(Delay:LongWord):LongWord; inline;
-//function SystemRegister //To Do //Register Shutdown/Restart handler
-//function SystemDeregister //To Do //Deregister Shutdown/Restart handler
+function SystemRestart(Delay:LongWord):LongWord;
+function SystemShutdown(Delay:LongWord):LongWord;
+
+function SystemRegisterShutdown(Callback:TShutdownCallback;Parameter:Pointer;Timeout:LongWord):LongWord;
+function SystemDeregisterShutdown(Callback:TShutdownCallback;Parameter:Pointer):LongWord;
+
 function SystemGetUptime:Int64; inline;
 function SystemGetCommandLine:String; inline;
 function SystemGetEnvironment:Pointer; inline;
+
+function SystemDateToString(Date:TDateTime):String; inline;
+function SystemTimeToString(Time:TDateTime):String; inline;
+function SystemDateTimeToString(DateTime:TDateTime):String; inline;
+function SystemIntervalToString(Interval:TDateTime):String; inline;
 
 {==============================================================================}
 {CPU Functions}
@@ -2484,6 +2546,7 @@ function I2CGetAddress:Word; inline;
 function I2CSetAddress(Address:Word):LongWord; inline;
 
 function I2CGetDescription(Id:LongWord):String; inline;
+function I2CSlaveGetDescription(Id:LongWord):String; inline;
 
 {==============================================================================}
 {PWM Functions}
@@ -2694,6 +2757,7 @@ function HostSetDomain(const ADomain:String):Boolean; inline;
 {==============================================================================}
 {Module Functions}
 function ModuleLoad(const AName:String):THandle; inline;
+function ModuleLoadEx(const AName:String;AFlags:LongWord):THandle; inline;
 function ModuleUnload(AHandle:THandle):Boolean; inline;
 function ModuleGetName(AHandle:THandle):String; inline;
 
@@ -2756,7 +2820,9 @@ function SysUtilsGetTickCount64:QWord;
 {SysUtils Locale Functions}
 procedure SysUtilsGetLocalTime(var SystemTime:TSystemTime);
 procedure SysUtilsSetLocalTime(const SystemTime:TSystemTime);
+function SysUtilsGetUniversalTime(var SystemTime:TSystemTime):Boolean;
 function SysUtilsGetLocalTimeOffset:Integer;
+function SysUtilsGetLocalTimeOffsetEx(const DateTime:TDateTime;const InputIsUTC:Boolean;out Offset:Integer):Boolean;
 
 {==============================================================================}
 {Platform Helper Functions}
@@ -2778,6 +2844,8 @@ implementation
 var
  {Platform specific variables}
  HandleTable:THandleTable;
+ 
+ ShutdownTable:PShutdownEntry;
  
  DataAbortException:EDataAbort;
  PrefetchAbortException:EPrefetchAbort;
@@ -2857,6 +2925,11 @@ begin
  HandleTableLock.AcquireLock:=nil;
  HandleTableLock.ReleaseLock:=nil;
 
+ {Initialize Shutdown Table Lock}
+ ShutdownTableLock.Lock:=INVALID_HANDLE_VALUE;
+ ShutdownTableLock.AcquireLock:=nil;
+ ShutdownTableLock.ReleaseLock:=nil;
+
  {Initialize Utility Lock}
  UtilityLock.Lock:=INVALID_HANDLE_VALUE;
  UtilityLock.AcquireLock:=nil;
@@ -2866,6 +2939,9 @@ begin
  ShutdownSemaphore.Semaphore:=INVALID_HANDLE_VALUE;
  ShutdownSemaphore.WaitSemaphore:=nil;
  ShutdownSemaphore.SignalSemaphore:=nil;
+ 
+ {Initialize Shutdown Worker}
+ ShutdownWorker.ScheduleWorker:=nil;
  
  {Setup System Handlers}
  {Random Functions}
@@ -2889,7 +2965,9 @@ begin
  {Locale Functions}
  SysUtilsGetLocalTimeHandler:=SysUtilsGetLocalTime;
  SysUtilsSetLocalTimeHandler:=SysUtilsSetLocalTime;
+ SysUtilsGetUniversalTimeHandler:=SysUtilsGetUniversalTime;
  SysUtilsGetLocalTimeOffsetHandler:=SysUtilsGetLocalTimeOffset;
+ SysUtilsGetLocalTimeOffsetExHandler:=SysUtilsGetLocalTimeOffsetEx;
  {Tick Functions}
  SysUtilsGetTickCountHandler:=SysUtilsGetTickCount;
  SysUtilsGetTickCount64Handler:=SysUtilsGetTickCount64;
@@ -2963,11 +3041,20 @@ begin
  {Initialize Handle Table}
  HandleTable.Next:=HANDLE_TABLE_MIN;
  HandleTable.Count:=0;
- SetLength(HandleTable.Handles,HANDLE_TABLE_MASK + 1);
- for Count:=0 to HANDLE_TABLE_MASK do 
+ HandleTable.Handles:=AllocMem(SizeOf(THandleEntries));
+ if HandleTable.Handles <> nil then
   begin
-   HandleTable.Handles[Count]:=nil;
-  end;
+   for Count:=0 to HANDLE_TABLE_MASK do 
+    begin
+     HandleTable.Handles[Count]:=nil;
+    end;
+  end;  
+
+ {Initialize Shutdown Table}
+ ShutdownTable:=nil;
+
+ {Initialize Shutdown Worker}
+ ShutdownWorker.Data:=AllocMem(SizeOf(TShutdownData));
  
  {Initialize Hardware Exceptions}
  DataAbortException:=EDataAbort.Create(STRING_DATA_ABORT);
@@ -3425,6 +3512,133 @@ begin
   end;
 
  OptionsInitCompleted:=True; 
+end;
+
+{==============================================================================}
+{==============================================================================}
+{Internal Functions}
+procedure ShutdownCallback(Data:PShutdownData);
+{Called by a worker thread to process a shutdown entry callback}
+begin
+ {}
+ {Check Data}
+ if Data = nil then Exit;
+ 
+ {Check Entry}
+ if Data.Entry = nil then Exit;
+ 
+ {Call the Callback}
+ Data.Entry.Callback(Data.Flags,Data.Entry.Parameter);
+end;
+
+{==============================================================================}
+
+procedure ShutdownCompleted(Data:PShutdownData);
+{Called by a worker thread to inform that a shutdown callback has completed}
+begin
+ {}
+ {Check Data}
+ if Data = nil then Exit;
+ 
+ {Check Entry}
+ if Data.Entry = nil then Exit;
+
+ {Signal the Semaphore}
+ if Assigned(ShutdownSemaphore.SignalSemaphore) then
+  begin
+   ShutdownSemaphore.SignalSemaphore(ShutdownSemaphore.Semaphore);
+  end; 
+end;
+
+{==============================================================================}
+
+procedure ShutdownTask(Data:PShutdownData);
+{Called by a worker thread to initiate a Shutdown or Restart sequence}
+var
+ Delay:LongWord;
+ Flags:LongWord;
+ Status:LongWord;
+ Timeout:LongWord;
+ Entry:PShutdownEntry;
+begin
+ {}
+ {Acquire Table Lock}
+ if ShutdownTableLock.Lock <> INVALID_HANDLE_VALUE then ShutdownTableLock.AcquireLock(ShutdownTableLock.Lock);
+ try
+  {Set Defaults}
+  Delay:=SHUTDOWN_DEFAULT_DELAY;
+  Flags:=SHUTDOWN_FLAG_NONE;
+
+  {Check Data}
+  if Data <> nil then
+   begin
+    Delay:=Data.Delay;
+    Flags:=Data.Flags;
+   end;
+
+  {Wait Delay}
+  Sleep(Delay);
+
+  {Check Data and Flags}
+  if (Data <> nil) and ((Flags and SHUTDOWN_FLAG_FORCE) = 0) then
+   begin
+    {Notify Registered Callbacks}
+    Entry:=ShutdownTable;
+    while Entry <> nil do
+     begin
+      if Assigned(ShutdownWorker.ScheduleWorker) and Assigned(ShutdownSemaphore.WaitSemaphore) then
+       begin
+        {Set Entry}
+        Data.Entry:=Entry;
+        
+        {Schedule Worker}
+        Status:=ShutdownWorker.ScheduleWorker(0,TWorkerTask(ShutdownCallback),Data,TWorkerCallback(ShutdownCompleted));
+        if Status <> ERROR_SUCCESS then
+         begin
+          if PLATFORM_LOG_ENABLED then PlatformLogError('Failed to schedule worker for shutdown callback (Status=' + ErrorToString(Status) + ')');
+         end
+        else
+         begin
+          {Get Timeout}
+          Timeout:=SHUTDOWN_DEFAULT_TIMEOUT;
+          if Entry.Timeout > 0 then Timeout:=Entry.Timeout;
+          
+          {Wait Completion}
+          Status:=ShutdownSemaphore.WaitSemaphore(ShutdownSemaphore.Semaphore,Timeout);
+          if Status = ERROR_WAIT_TIMEOUT then
+           begin
+            if PLATFORM_LOG_ENABLED then PlatformLogError('Timeout waiting for shutdown callback (Status=' + ErrorToString(Status) + ')'); 
+           end
+          else if Status <> ERROR_SUCCESS then
+           begin
+            if PLATFORM_LOG_ENABLED then PlatformLogError('Failure waiting for shutdown callback (Status=' + ErrorToString(Status) + ')');
+           end;
+         end; 
+       end; 
+
+      {Get Next Entry}
+      Entry:=Entry.Next;
+     end;
+     
+    {Reset Entry}
+    Data.Entry:=nil;
+   end;
+
+  {Check Flags}
+  if (Flags and SHUTDOWN_FLAG_RESTART) = 0 then
+   begin
+    {Shutdown}
+    SystemShutdownHandler(SHUTDOWN_MINIMUM_DELAY);
+   end
+  else
+   begin
+    {Restart}
+    SystemRestartHandler(SHUTDOWN_MINIMUM_DELAY);
+   end; 
+ finally
+  {Release Table Lock}
+  if ShutdownTableLock.Lock <> INVALID_HANDLE_VALUE then ShutdownTableLock.ReleaseLock(ShutdownTableLock.Lock);
+ end;  
 end;
 
 {==============================================================================}
@@ -4654,7 +4868,7 @@ function DeregisterInterrupt(Number,Mask,Priority,Flags:LongWord;Handler:TShared
 {Request deregistration of the supplied handler from the specified interrupt number (Where Applicable)}
 {Number: The interrupt number to deregister the hanlder for}
 {Mask: The mask of CPUs to deregister the handler for (eg CPU_MASK_0, CPU_MASK_1) (Where Applicable)}
-{Priority: The priroty level of the interrupt to be deregistered (eg INTERRUPT_PRIORITY_MAXIMUM) (Where Applicable)}
+{Priority: The priority level of the interrupt to be deregistered (eg INTERRUPT_PRIORITY_MAXIMUM) (Where Applicable)}
 {Flags: The flags to control the deregistration of the interrupt (eg INTERRUPT_FLAG_SHARED, INTERRUPT_FLAG_LOCAL, INTERRUPT_FLAG_FIQ) (Where Applicable)}
 {Handler: The shared interrupt handler to be called when the interrupt occurs}
 {Parameter: A pointer to be passed to the handler when the interrupt occurs (Optional)}
@@ -4984,20 +5198,31 @@ end;
 {==============================================================================}
 {==============================================================================}
 {System Functions}
-function SystemRestart(Delay:LongWord):LongWord; inline;
+function SystemRestart(Delay:LongWord):LongWord;
 {Restart the system}
+{Delay: How long to delay before commencing the restart (Milliseconds)}
+{Return: ERROR_SUCCESS if the restart was successfully initiated or another error code on failure}
+var
+ Data:PShutdownData;
 begin
  {}
  if Assigned(SystemRestartHandler) then
   begin
-   //To Do //Transfer to Worker
-   
-   //To Do //Implement Delay (by Worker)
-   
-   //To Do //Call Shutdown handlers (Worker with Callback using Semaphore with Timeout)
-   //To Do //Optional Force parameter to bypass handlers
-   
-   Result:=SystemRestartHandler(Delay); //To Do //Pass default delay
+   if Assigned(ShutdownWorker.ScheduleWorker) and (ShutdownWorker.Data <> nil) then
+    begin
+     {Get Data}
+     Data:=PShutdownData(ShutdownWorker.Data);
+     Data.Delay:=Delay;
+     Data.Flags:=SHUTDOWN_FLAG_RESTART;
+     
+     {Schedule Worker}
+     Result:=ShutdownWorker.ScheduleWorker(0,TWorkerTask(ShutdownTask),Data,nil);
+    end
+   else
+    begin
+     {Call Handler}
+     Result:=SystemRestartHandler(Delay);
+    end; 
   end
  else
   begin
@@ -5007,25 +5232,166 @@ end;
 
 {==============================================================================}
 
-function SystemShutdown(Delay:LongWord):LongWord; inline;
+function SystemShutdown(Delay:LongWord):LongWord;
 {Shutdown the system}
+{Delay: How long to delay before commencing the shutdown (Milliseconds)}
+{Return: ERROR_SUCCESS if the shutdown was successfully initiated or another error code on failure}
+var
+ Data:PShutdownData;
 begin
  {}
  if Assigned(SystemShutdownHandler) then
   begin
-   //To Do //Transfer to Worker
-   
-   //To Do //Implement Delay (by Worker)
-  
-   //To Do //Call Shutdown handlers (Worker with Callback using Semaphore with Timeout)
-   //To Do //Optional Force parameter to bypass handlers
-   
-   Result:=SystemShutdownHandler(Delay); //To Do //Pass default delay
+   if Assigned(ShutdownWorker.ScheduleWorker) and (ShutdownWorker.Data <> nil) then
+    begin
+     {Get Data}
+     Data:=PShutdownData(ShutdownWorker.Data);
+     Data.Delay:=Delay;
+     Data.Flags:=SHUTDOWN_FLAG_NONE;
+     
+     {Schedule Worker}
+     Result:=ShutdownWorker.ScheduleWorker(0,TWorkerTask(ShutdownTask),Data,nil);
+    end
+   else
+    begin
+     {Call Handler}
+     Result:=SystemShutdownHandler(Delay);
+    end; 
   end
  else
   begin
    Result:=ERROR_CALL_NOT_IMPLEMENTED;
   end;
+end;
+
+{==============================================================================}
+
+function SystemRegisterShutdown(Callback:TShutdownCallback;Parameter:Pointer;Timeout:LongWord):LongWord;
+{Register a procedure to be called during system shutdown or restart}
+{Callback: The procedure to be called on shutdown or restart}
+{Parameter: A pointer to be passed to the callback procedure}
+{Timeout: Time the shutdown process should wait for this callback to complete (0 for the default timeout) (Milliseconds)}
+{Return: ERROR_SUCCESS if the callback was successfully registered or another error code on failure}
+var
+ Entry:PShutdownEntry;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {Check Callback}
+ if not Assigned(Callback) then Exit;
+
+ {Acquire Table Lock}
+ if ShutdownTableLock.Lock <> INVALID_HANDLE_VALUE then ShutdownTableLock.AcquireLock(ShutdownTableLock.Lock);
+ try
+  Result:=ERROR_ALREADY_EXISTS;
+
+  {Check Entry}
+  Entry:=ShutdownTable;
+  while Entry <> nil do
+   begin
+    {Check Entry}
+    if (@Entry.Callback = @Callback) and (Entry.Parameter = Parameter) then Exit;
+     
+    {Next Entry}
+    Entry:=Entry.Next;
+   end;
+
+  Result:=ERROR_OUTOFMEMORY;
+
+  {Create Entry}
+  Entry:=AllocMem(SizeOf(TShutdownEntry));
+  if Entry = nil then Exit;
+
+  {Update Entry}
+  Entry.Signature:=SHUTDOWN_SIGNATURE;
+  Entry.Callback:=Callback;
+  Entry.Parameter:=Parameter;
+  Entry.Timeout:=Timeout;
+
+  {Link Entry}
+  if ShutdownTable = nil then
+   begin
+    ShutdownTable:=Entry;
+   end
+  else
+   begin
+    Entry.Next:=ShutdownTable;
+    ShutdownTable.Prev:=Entry;
+    ShutdownTable:=Entry;
+   end;
+
+  if PLATFORM_LOG_ENABLED then PlatformLogInfo('Registerd shutdown callback (Callback=' + PtrToHex(@Callback) + ')');
+
+  Result:=ERROR_SUCCESS;
+ finally
+  {Release Table Lock}
+  if ShutdownTableLock.Lock <> INVALID_HANDLE_VALUE then ShutdownTableLock.ReleaseLock(ShutdownTableLock.Lock);
+ end;  
+end;
+
+{==============================================================================}
+
+function SystemDeregisterShutdown(Callback:TShutdownCallback;Parameter:Pointer):LongWord;
+{Deregister a procedure from being called during system shutdown or restart}
+{Callback: The procedure previously registered for shutdown or restart}
+{Parameter: The pointer previously registered for the callback procedure}
+{Return: ERROR_SUCCESS if the callback was successfully deregistered or another error code on failure}
+var
+ Prev:PShutdownEntry;
+ Next:PShutdownEntry;
+ Entry:PShutdownEntry;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {Check Callback}
+ if not Assigned(Callback) then Exit;
+
+ {Acquire Table Lock}
+ if ShutdownTableLock.Lock <> INVALID_HANDLE_VALUE then ShutdownTableLock.AcquireLock(ShutdownTableLock.Lock);
+ try
+  Result:=ERROR_NOT_FOUND;
+  
+  {Find Entry}
+  Entry:=ShutdownTable;
+  while Entry <> nil do
+   begin
+    {Check Entry}
+    if (@Entry.Callback = @Callback) and (Entry.Parameter = Parameter) then Break;
+     
+    {Next Entry}
+    Entry:=Entry.Next;
+   end;
+  if Entry = nil then Exit;
+
+  {Unlink Entry}
+  Prev:=Entry.Prev;
+  Next:=Entry.Next;
+  if Prev = nil then
+   begin
+    ShutdownTable:=Next;
+    if Next <> nil then Next.Prev:=nil;
+   end
+  else
+   begin
+    Prev.Next:=Next;
+    if Next <> nil then Next.Prev:=Prev;
+   end;     
+
+  {Invalidate Entry}
+  Entry.Signature:=0;
+
+  {Free Entry}
+  FreeMem(Entry);
+
+  if PLATFORM_LOG_ENABLED then PlatformLogInfo('Deregisterd shutdown callback (Callback=' + PtrToHex(@Callback) + ')');
+
+  Result:=ERROR_SUCCESS;
+ finally
+  {Release Table Lock}
+  if ShutdownTableLock.Lock <> INVALID_HANDLE_VALUE then ShutdownTableLock.ReleaseLock(ShutdownTableLock.Lock);
+ end;  
 end;
 
 {==============================================================================}
@@ -5094,6 +5460,62 @@ begin
   begin
    Result:=envp;
   end;
+end;
+
+{==============================================================================}
+
+function SystemDateToString(Date:TDateTime):String; inline;
+{Return the supplied date value as a string in the system defined format}
+{Date: The date in Pascal TDateTime format}
+{Return: The date formatted according to the system date format}
+
+{Note: Applications should use FormatDateTime or DateTimeToString directly}
+{      This function is intended to provide a uniform and generic date and}
+{      time output from system functions such as logging and debug output}
+begin
+ {}
+ Result:=FormatDateTime(SYSTEM_DATE_FORMAT,Date);
+end;
+
+{==============================================================================}
+
+function SystemTimeToString(Time:TDateTime):String; inline;
+{Return the supplied time value as a string in the system defined format}
+{Time: The time in Pascal TDateTime format}
+{Return: The time formatted according to the system time format}
+
+{Note: Applications should use FormatDateTime or DateTimeToString directly}
+{      This function is intended to provide a uniform and generic date and}
+{      time output from system functions such as logging and debug output}
+begin
+ {}
+ Result:=FormatDateTime(SYSTEM_TIME_FORMAT,Time);
+end;
+
+{==============================================================================}
+
+function SystemDateTimeToString(DateTime:TDateTime):String; inline;
+{Return the supplied date and time value as a string in the system defined format}
+{DateTime: The date and time in Pascal TDateTime format}
+{Return: The date and time formatted according to the system date and time format}
+
+{Note: Applications should use FormatDateTime or DateTimeToString directly}
+{      This function is intended to provide a uniform and generic date and}
+{      time output from system functions such as logging and debug output}
+begin
+ {}
+ Result:=FormatDateTime(SYSTEM_DATE_FORMAT + ' ' + SYSTEM_TIME_FORMAT,DateTime);
+end;
+
+{==============================================================================}
+
+function SystemIntervalToString(Interval:TDateTime):String; inline;
+{Return the supplied time interval as a string in the system defined format}
+{Interval: The time interval in Pascal TDateTime format}
+{Return: The time interval formatted according to the system time format}
+begin
+ {}
+ Result:=IntToStr(Trunc(Interval)) + ' days ' + FormatDateTime(SYSTEM_TIME_FORMAT,Interval);
 end;
 
 {==============================================================================}
@@ -5264,7 +5686,7 @@ end;
 {==============================================================================}
 
 function CPUGetPercentage(CPUID:LongWord):Double; inline;
-{Get the last second ulitization of the specified CPU in percentage}
+{Get the last second utilization of the specified CPU in percentage}
 {CPUID: The CPU to get utilization from or CPU_ID_ALL for average of all CPUs}
 var
  Count:LongWord;
@@ -5317,7 +5739,7 @@ end;
 {==============================================================================}
 
 function CPUGetUtilization(CPUID:LongWord):LongWord; inline;
-{Get the last second ulitization of the specified CPU}
+{Get the last second utilization of the specified CPU}
 {CPUID: The CPU to get utilization from or CPU_ID_ALL for average of all CPUs}
 var
  Count:LongWord;
@@ -6104,7 +6526,7 @@ function ClockGetTime:Int64;
 {Note: This is the same time format as Windows FILE_TIME and is intended to allow
        compatibility with file system functions etc.}
 {Note: By default the time returned by this function is considered to be UTC but
- the actual conversion between UTC and local time is handled at a higher level}
+       the actual conversion between UTC and local time is handled at a higher level}
 begin
  {}
  if CLOCK_CYCLES_PER_MICROSECOND > 0 then
@@ -6157,7 +6579,7 @@ function ClockSetTime(const Time:Int64;RTC:Boolean):Int64;
 {Note: This is the same time format as Windows FILE_TIME and is intended to allow
        compatibility with file system functions etc.}
 {Note: By default the time passed to this function is considered to be UTC but
- the actual conversion between UTC and local time is handled at a higher level}
+       the actual conversion between UTC and local time is handled at a higher level}
 var
  CurrentTicks:Int64;
 begin
@@ -6598,7 +7020,7 @@ end;
 {==============================================================================}
 
 function DispmanxHandleGet(Resource:THandle):THandle; inline;
-{Convert a Dispmanx Resouse handle to a Memory handle (Which can be passed to Lock/Unlock above)}
+{Convert a Dispmanx Resource handle to a Memory handle (Which can be passed to Lock/Unlock above)}
 begin
  {}
  if Assigned(DispmanxHandleGetHandler) then
@@ -7529,8 +7951,8 @@ end;
 {==============================================================================}
  
 function DMAReadPeripheral(Address,Dest:Pointer;Size,Peripheral:LongWord):LongWord; inline;
-{Read from a periperal address to the destination address using DMA}
-{Address: The address of the periperhal register to read from}
+{Read from a peripheral address to the destination address using DMA}
+{Address: The address of the peripheral register to read from}
 {Dest: The destination address to start writing to}
 {Size: The size of the read in bytes}
 {Peripheral: The peripheral ID for data request gating (eg DMA_DREQ_ID_UART_RX)}
@@ -8928,7 +9350,7 @@ end;
 
 function SPIGetDescription(Id:LongWord):String; inline;
 {Return the device description of an SPI device}
-{Id: The Id number of the SPI device as shown in the offical documentation}
+{Id: The Id number of the SPI device as shown in the official documentation}
 {Return: The correct device description suitable for passing to SPIDeviceFindByDescription}
 
 {Note: The Id number supplied to this function may differ from the Ultibo device id value}
@@ -9169,7 +9591,7 @@ end;
 
 function I2CGetDescription(Id:LongWord):String; inline;
 {Get the device description of an I2C device}
-{Id: The Id number of the I2C device as shown in the offical documentation}
+{Id: The Id number of the I2C device as shown in the official documentation}
 {Return: The correct device description suitable for passing to I2CDeviceFindByDescription}
 
 {Note: The Id number supplied to this function may differ from the Ultibo device id value}
@@ -9178,6 +9600,26 @@ begin
  if Assigned(I2CGetDescriptionHandler) then
   begin
    Result:=I2CGetDescriptionHandler(Id);
+  end
+ else
+  begin
+   Result:='';
+  end;
+end;
+
+{==============================================================================}
+
+function I2CSlaveGetDescription(Id:LongWord):String; inline;
+{Get the device description of an I2C slave device}
+{Id: The Id number of the I2C slave device as shown in the official documentation}
+{Return: The correct device description suitable for passing to I2CSlaveFindByDescription}
+
+{Note: The Id number supplied to this function may differ from the Ultibo device id value}
+begin
+ {}
+ if Assigned(I2CSlaveGetDescriptionHandler) then
+  begin
+   Result:=I2CSlaveGetDescriptionHandler(Id);
   end
  else
   begin
@@ -9339,8 +9781,8 @@ end;
 
 function PWMGetDescription(Id,Channel:LongWord):String; inline;
 {Get the device description of an PWM device}
-{Id: The Id number of the PWM device as shown in the offical documentation}
-{Channel: The channel number of the PWM device as shown in the offical documentation}
+{Id: The Id number of the PWM device as shown in the official documentation}
+{Channel: The channel number of the PWM device as shown in the official documentation}
 {Return: The correct device description suitable for passing to PWMDeviceFindByDescription}
 
 {Note: The Id number supplied to this function may differ from the Ultibo device id value}
@@ -9416,7 +9858,7 @@ end;
 {UART Functions}
 function UARTGetDescription(Id:LongWord):String; inline; 
 {Get the device description of a UART device}
-{Id: The Id number of the UART device as shown in the offical documentation}
+{Id: The Id number of the UART device as shown in the official documentation}
 {Return: The correct device description suitable for passing to UARTDeviceFindByDescription}
 
 {Note: The Id number supplied to this function may differ from the Ultibo device id value}
@@ -11383,6 +11825,21 @@ end;
 
 {==============================================================================}
 
+function ModuleLoadEx(const AName:String;AFlags:LongWord):THandle; inline;
+begin
+ {}
+ if Assigned(ModuleLoadExHandler) then
+  begin
+   Result:=ModuleLoadExHandler(AName,AFlags);
+  end
+ else
+  begin
+   Result:=INVALID_HANDLE_VALUE; 
+  end;  
+end;
+
+{==============================================================================}
+
 function ModuleUnload(AHandle:THandle):Boolean; inline;
 begin
  {}
@@ -12102,11 +12559,51 @@ end;
 
 {==============================================================================}
 
+function SysUtilsGetUniversalTime(var SystemTime:TSystemTime):Boolean;
+{Get the current UTC time as a SystemTime value}
+var
+ ClockTime:Int64;
+ DateTime:TDateTime;
+begin
+ {}
+ Result:=False;
+ 
+ FillChar(SystemTime,SizeOf(TSystemTime),0);
+ 
+ {Get Clock Time}
+ ClockTime:=ClockGetTime;
+ 
+ {Check Clock Time}
+ if ClockTime < TIME_TICKS_TO_1899 then Exit;
+  
+ {Convert to DateTime}
+ DateTime:=((ClockTime - TIME_TICKS_TO_1899) div TIME_TICKS_PER_DAY) + (((ClockTime - TIME_TICKS_TO_1899) mod TIME_TICKS_PER_DAY) / TIME_TICKS_PER_DAY);
+
+ {Convert to SystemTime}
+ DecodeDate(DateTime,SystemTime.Year,SystemTime.Month,SystemTime.Day);
+ DecodeTime(DateTime,SystemTime.Hour,SystemTime.Minute,SystemTime.Second,SystemTime.MilliSecond);
+  
+ Result:=True;
+end;
+
+{==============================================================================}
+
 function SysUtilsGetLocalTimeOffset:Integer;
 {Get the current local time offset value}
 begin
  {}
  Result:=TIMEZONE_TIME_OFFSET;
+end;
+
+{==============================================================================}
+
+function SysUtilsGetLocalTimeOffsetEx(const DateTime:TDateTime;const InputIsUTC:Boolean;out Offset:Integer):Boolean;
+{Get the current local time offset value at the given date and time}
+begin
+ {}
+ Result:=False;
+
+ {Not currently supported - See: GetLocalTimeOffset in rtl\win\sysutils.pp}
 end;
 
 {==============================================================================}
@@ -12142,6 +12639,7 @@ begin
   HANDLE_TYPE_PIPE:Result:='HANDLE_TYPE_PIPE';
   HANDLE_TYPE_SOCKET:Result:='HANDLE_TYPE_SOCKET';
   HANDLE_TYPE_DEVICE:Result:='HANDLE_TYPE_DEVICE';
+  HANDLE_TYPE_FIRMWARE:Result:='HANDLE_TYPE_FIRMWARE';
  else
   begin
    if HandleType > HANDLE_TYPE_USER_BASE then

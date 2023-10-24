@@ -1,6 +1,6 @@
 {
     This file is part of the Free Pascal run time library.
-    Copyright (c) 2015 by Free Pascal development team
+    Copyright (c) 2022 by Free Pascal development team
 
     This file implements all the base types and limits required
     for a minimal POSIX compliant subset required to port the compiler
@@ -25,6 +25,8 @@ type
   {$endif CPU64}
   { A thread id is the same as a thread handle }
   TThreadID = THandle;
+  
+  TOSTimestamp = {$if defined(FPC_STABLE) or defined(FPC_FIXES) or defined(FPC_LEGACY)}Longint{$else}Int64{$endif};
 
   { pthread_mutex_t }
   PRTLCriticalSection = ^TRTLCriticalSection;
@@ -49,7 +51,7 @@ type
 //   THREAD_PRIORITY_HIGHEST       = 2;
 //   THREAD_PRIORITY_TIME_CRITICAL = 15;
 //Ultibo //Should we add these here, differs from Threads.pas values ?
-         //See: D:\LANGUAGE\Fpc311.ARM-Embedded\source\rtl\netware\sysosh.inc
+         //See: source\rtl\netware\sysosh.inc
 
 var
  SystemCPUCount:LongWord = 1;

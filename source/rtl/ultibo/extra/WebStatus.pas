@@ -1,7 +1,7 @@
 {
 Ultibo Web Status unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -42,9 +42,11 @@ unit WebStatus;
 
 interface
 
-uses GlobalConfig,GlobalConst,GlobalTypes,Platform,{$IFDEF CPUARM}PlatformARM,{$ENDIF}{$IFDEF CPUAARCH64}PlatformAARCH64,{$ENDIF}Threads,SysUtils,Classes,Ultibo,UltiboClasses,UltiboUtils,Winsock2,HTTP,
-     HeapManager,DeviceTree,Devices,USB,PCI,MMC,Network,Transport,Protocol,Storage,FileSystem,Keyboard,Keymap,Mouse,Touch,Console,Framebuffer,Font,Logging,
-     Timezone,Locale,Unicode,Iphlpapi,GPIO,UART,Serial,I2C,SPI,PWM,DMA,RTC;
+uses GlobalConfig,GlobalConst,GlobalTypes,Platform,{$IFDEF CPUARM}PlatformARM,{$ENDIF}{$IFDEF CPUAARCH64}PlatformAARCH64,{$ENDIF}
+     Threads,SysUtils,Classes,Ultibo,UltiboClasses,UltiboUtils,Winsock2,HTTP,HeapManager,
+     DeviceTree,Devices,USB,PCI,MMC,HID,USBHID,Network,Transport,Protocol,Storage,
+     FileSystem,Keyboard,Keymap,Mouse,Touch,Console,Framebuffer,Font,Logging,Timezone,
+     Locale,Unicode,Iphlpapi,GPIO,UART,Serial,I2C,SPI,PWM,DMA,RTC,Joystick;
 
 //To Do //Look for:
 
@@ -97,7 +99,11 @@ type
   procedure SetTitle(const ATitle:String);
   function GetCaption:String;
   
+  function NormalizedDateToStr(const DateTime:TDateTime):String;
+  function NormalizedTimeToStr(const DateTime:TDateTime):String;
   function NormalizedDateTimeToStr(const DateTime:TDateTime):String;
+
+  function NormalizedIntervalToStr(const DateTime:TDateTime):String;
  protected
   {Internal Variables}
 
@@ -157,7 +163,11 @@ type
   function GetTitle:String;
   function GetCaption:String;
   
+  function NormalizedDateToStr(const DateTime:TDateTime):String;
+  function NormalizedTimeToStr(const DateTime:TDateTime):String;
   function NormalizedDateTimeToStr(const DateTime:TDateTime):String;
+
+  function NormalizedIntervalToStr(const DateTime:TDateTime):String;
  protected
   {Internal Variables}
   FCaption:String; //To Do //Hash ?
@@ -463,10 +473,13 @@ type
   function SDHCIFlagsToFlagNames(AFlags:LongWord):TStringList;
 
   function USBFlagsToFlagNames(AFlags:LongWord):TStringList;
+  function USBHubFlagsToFlagNames(AFlags:LongWord):TStringList;
   function USBHostFlagsToFlagNames(AFlags:LongWord):TStringList;
 
   function PCIFlagsToFlagNames(AFlags:LongWord):TStringList;
   function PCIHostFlagsToFlagNames(AFlags:LongWord):TStringList;
+
+  function HIDFlagsToFlagNames(AFlags:LongWord):TStringList;
 
   function DMAFlagsToFlagNames(AFlags:LongWord):TStringList;
   function I2CFlagsToFlagNames(AFlags:LongWord):TStringList;
@@ -487,6 +500,7 @@ type
   function LoggingFlagsToFlagNames(AFlags:LongWord):TStringList;
   function StorageFlagsToFlagNames(AFlags:LongWord):TStringList; 
   function KeyboardFlagsToFlagNames(AFlags:LongWord):TStringList; 
+  function JoystickFlagsToFlagNames(AFlags:LongWord):TStringList;
   function ConsoleFlagsToFlagNames(AFlags:LongWord):TStringList;
   function FramebufferFlagsToFlagNames(AFlags:LongWord):TStringList;
   function ConsoleWindowFlagsToFlagNames(AFlags:LongWord):TStringList;
@@ -625,6 +639,26 @@ type
   
  end;
 
+ TWebStatusHID = class(TWebStatusSub)
+ public
+  {}
+  constructor Create(AMain:TWebStatusMain);
+ private
+  {Internal Variables}
+  function HIDFlagsToFlagNames(AFlags:LongWord):TStringList;
+ protected
+  {Internal Variables}
+ 
+  {Internal Methods}
+ 
+  function DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;AResponse:THTTPServerResponse):Boolean; override;
+ public
+  {Public Properties}
+ 
+  {Public Methods}
+  
+ end;
+
  TWebStatusNetwork = class(TWebStatusSub)
  public
   {}
@@ -655,6 +689,9 @@ type
  private
   {Internal Variables}
   
+  {Internal Methods}
+
+  function StorageFlagsToFlagNames(AFlags:LongWord):TStringList; 
  protected
   {Internal Variables}
  
@@ -715,6 +752,11 @@ type
  private
   {Internal Variables}
   
+  {Internal Methods}
+
+  function KeyboardFlagsToFlagNames(AFlags:LongWord):TStringList; 
+
+  function KeyboardLEDsToNames(ALEDs:LongWord):TStringList;
  protected
   {Internal Variables}
  
@@ -735,6 +777,11 @@ type
  private
   {Internal Variables}
   
+  {Internal Methods}
+
+  function MouseFlagsToFlagNames(AFlags:LongWord):TStringList;
+
+  function MouseButtonsToNames(AButtons:LongWord):TStringList;
  protected
   {Internal Variables}
  
@@ -755,6 +802,9 @@ type
  private
   {Internal Variables}
   
+  {Internal Methods}
+
+  function TouchFlagsToFlagNames(AFlags:LongWord):TStringList;
  protected
   {Internal Variables}
  
@@ -766,6 +816,29 @@ type
  
   {Public Methods}
   
+ end;
+
+ TWebStatusJoystick = class(TWebStatusSub)
+ public
+  {}
+  constructor Create(AMain:TWebStatusMain);
+ private
+  {Internal Variables}
+
+  {Internal Methods}
+
+  function JoystickFlagsToFlagNames(AFlags:LongWord):TStringList;
+ protected
+  {Internal Variables}
+
+  {Internal Methods}
+
+  function DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;AResponse:THTTPServerResponse):Boolean; override;
+ public
+  {Public Properties}
+
+  {Public Methods}
+
  end;
 
  TWebStatusFramebuffer = class(TWebStatusSub)
@@ -998,6 +1071,7 @@ type
   Host:THTTPHost;
   Request:THTTPServerRequest;
   Response:THTTPServerResponse;
+  ContentStream:TStream;
   Data:Pointer;
  end;
  
@@ -1007,6 +1081,8 @@ var
  WEBSTATUS_FONT_NAME:String = 'Arial';
  WEBSTATUS_HEAP_FREE_COUNT:LongWord = 250;  {Maximum number of free heap blocks to display}
  WEBSTATUS_HEAP_USED_COUNT:LongWord = 250;  {Maximum number of used heap blocks to display}
+ WEBSTATUS_ALLOW_RESTART:LongBool = True;   {If True enable the Restart button on the main page}
+ WEBSTATUS_ALLOW_SHUTDOWN:LongBool = True;  {If True enable the Shutdown button on the main page}
 
 {==============================================================================}
 {Initialization Functions}
@@ -1034,11 +1110,14 @@ function WebStatusPCIDriverEnumerate(Driver:PPCIDriver;Data:Pointer):LongWord;
 function WebStatusMMCEnumerate(MMC:PMMCDevice;Data:Pointer):LongWord;
 function WebStatusSDHCIEnumerate(SDHCI:PSDHCIHost;Data:Pointer):LongWord;
 function WebStatusSDIODriverEnumerate(Driver:PSDIODriver;Data:Pointer):LongWord;
+function WebStatusHIDDeviceEnumerate(Device:PHIDDevice;Data:Pointer):LongWord;
+function WebStatusHIDConsumerEnumerate(Consumer:PHIDConsumer;Data:Pointer):LongWord;
 function WebStatusNetworkEnumerate(Network:PNetworkDevice;Data:Pointer):LongWord;
 function WebStatusStorageEnumerate(Storage:PStorageDevice;Data:Pointer):LongWord;
 function WebStatusMouseEnumerate(Mouse:PMouseDevice;Data:Pointer):LongWord;
 function WebStatusTouchEnumerate(Touch:PTouchDevice;Data:Pointer):LongWord;
 function WebStatusKeyboardEnumerate(Keyboard:PKeyboardDevice;Data:Pointer):LongWord;
+function WebStatusJoystickEnumerate(Joystick:PJoystickDevice;Data:Pointer):LongWord;
 
 function WebStatusConsoleWindowEnumerate(Console:PConsoleDevice;Handle:TWindowHandle;Data:Pointer):LongWord;
 
@@ -1070,6 +1149,7 @@ var
  WebStatusUSB:TWebStatusUSB;
  WebStatusPCI:TWebStatusPCI;
  WebStatusMMC:TWebStatusMMC;
+ WebStatusHID:TWebStatusHID;
  WebStatusNetwork:TWebStatusNetwork;
  WebStatusStorage:TWebStatusStorage;
  WebStatusFilesystem:TWebStatusFilesystem;
@@ -1077,6 +1157,7 @@ var
  WebStatusKeyboard:TWebStatusKeyboard;
  WebStatusMouse:TWebStatusMouse;
  WebStatusTouch:TWebStatusTouch;
+ WebStatusJoystick:TWebStatusJoystick;
  WebStatusFramebuffer:TWebStatusFramebuffer;
  WebStatusEnvironment:TWebStatusEnvironment;
  WebStatusPageTables:TWebStatusPageTables;
@@ -1159,6 +1240,29 @@ end;
 
 {==============================================================================}
 
+function TWebStatusMain.NormalizedDateToStr(const DateTime:TDateTime):String;
+begin
+ {}
+ if DateTime = 0 then 
+  begin
+   Result:='N/A';
+  end
+ else
+  begin
+   Result:=SystemDateToString(DateTime);
+  end;  
+end;
+
+{==============================================================================}
+
+function TWebStatusMain.NormalizedTimeToStr(const DateTime:TDateTime):String;
+begin
+ {}
+ Result:=SystemTimeToString(DateTime);
+end;
+
+{==============================================================================}
+
 function TWebStatusMain.NormalizedDateTimeToStr(const DateTime:TDateTime):String;
 begin
  {}
@@ -1168,8 +1272,16 @@ begin
   end
  else
   begin
-   Result:=DateTimeToStr(DateTime);
+   Result:=SystemDateTimeToString(DateTime);
   end;  
+end;
+
+{==============================================================================}
+
+function TWebStatusMain.NormalizedIntervalToStr(const DateTime:TDateTime):String;
+begin
+ {}
+ Result:=SystemIntervalToString(DateTime);
 end;
 
 {==============================================================================}
@@ -1805,7 +1917,37 @@ end;
 {==============================================================================}
 
 function TWebStatusMain.DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;AResponse:THTTPServerResponse):Boolean; 
+
+ procedure AddRemoteAction;
+ begin
+  AddContent(AResponse,'<script>');
+  AddContent(AResponse,'function RemoteAction(theUrl) {');
+  AddContent(AResponse,'  var xmlhttp;');
+  AddContent(AResponse,'  if (window.XMLHttpRequest) {');
+  AddContent(AResponse,'    xmlhttp = new XMLHttpRequest();');
+  AddContent(AResponse,'  } else {');
+  AddContent(AResponse,'    // code for older browsers');
+  AddContent(AResponse,'    xmlhttp = new ActiveXObject("Microsoft.XMLHTTP");');
+  AddContent(AResponse,'  }');
+  AddContent(AResponse,'  xmlhttp.open("GET", theUrl, true);');
+  AddContent(AResponse,'  xmlhttp.send();');
+  AddContent(AResponse,'}');
+  AddContent(AResponse,'</script>');
+ end;
+
+ procedure AddConfirmAction;
+ begin
+  AddContent(AResponse,'<script>');
+  AddContent(AResponse,'function ConfirmAction(theUrl, thePrompt) {');
+  AddContent(AResponse,'  if (confirm(thePrompt) == true) {');
+  AddContent(AResponse,'    RemoteAction(theUrl);');
+  AddContent(AResponse,'  }');
+  AddContent(AResponse,'}');
+  AddContent(AResponse,'</script>');
+ end;
+
 var
+ Action:String;
  WorkTemp:Double;
  WorkTime:TDateTime;
 begin
@@ -1821,52 +1963,108 @@ begin
  {Check Response}
  if AResponse = nil then Exit;
 
- {Add Header}
- AddHeader(AResponse,GetTitle,nil); 
- 
- {Add Release Name}
- AddItem(AResponse,'Release Name:',ULTIBO_RELEASE_NAME);
+ {Get Action}
+ Action:=Uppercase(ARequest.GetParam('ACTION'));
+ if Action = 'RESTART' then
+  begin
+   {Add Result}
+   AResponse.Version:=HTTP_VERSION;
+   AResponse.Status:=HTTP_STATUS_OK;
+   AResponse.Reason:=HTTP_REASON_200;
 
- {Add Release Version}
- AddItem(AResponse,'Release Version:',ULTIBO_RELEASE_VERSION);
+   {Add Response}
+   AddContent(AResponse,'Restart');
 
- {Add Release Date}
- AddItem(AResponse,'Release Date:',ULTIBO_RELEASE_DATE);
+   {Restart}
+   SystemRestart(1000);
+  end
+ else if Action = 'SHUTDOWN' then
+  begin
+   {Add Result}
+   AResponse.Version:=HTTP_VERSION;
+   AResponse.Status:=HTTP_STATUS_OK;
+   AResponse.Reason:=HTTP_REASON_200;
+  
+   {Add Response}
+   AddContent(AResponse,'Shutdown');
 
- {Add Time (Local)}
- AddBlank(AResponse);
- AddItem(AResponse,'Time (Local):',DateTimeToStr(Now));
- 
- {Add Time (UTC)}
- AddItem(AResponse,'Time (UTC):',DateTimeToStr(SystemFileTimeToDateTime(GetCurrentTime)));
- 
- {Add Timezone}
- AddBlank(AResponse);
- AddItem(AResponse,'Timezone:',GetCurrentTimezone);
- AddBlank(AResponse);
- AddItemEx(AResponse,'Daylight Start:',GetTimezoneDaylightStart,2);
- AddItemEx(AResponse,'Daylight Date:',NormalizedDateTimeToStr(GetTimezoneDaylightDate),2);
- AddBlank(AResponse);
- AddItemEx(AResponse,'Standard Start:',GetTimezoneStandardStart,2);
- AddItemEx(AResponse,'Standard Date:',NormalizedDateTimeToStr(GetTimezoneStandardDate),2);
+   {Shutdown}
+   SystemShutdown(1000);
+  end
+ else
+  begin
+   {Add Scripts}
+   if WEBSTATUS_ALLOW_RESTART or WEBSTATUS_ALLOW_SHUTDOWN then
+    begin
+     {Remote Action}
+     AddRemoteAction;
 
- //To Do //Locale
- 
- //To Do //Codepage
- 
- {Add Temperature}
- WorkTemp:=TemperatureGetCurrent(TEMPERATURE_ID_SOC);
- AddBlank(AResponse);
- AddItem(AResponse,'Temperature (SoC):',FloatToStr(WorkTemp / 1000) + ' degrees Celcius');
- 
- {Add Uptime}
- WorkTime:=SystemFileTimeToDateTime(Uptime); {No Conversion}
- AddBlank(AResponse);
- AddItem(AResponse,'Uptime:',IntToStr(Trunc(WorkTime)) + ' days ' + TimeToStr(WorkTime));
- 
- {Add Footer}
- AddFooter(AResponse); 
- 
+     {Confirm Action}
+     AddConfirmAction;
+    end;
+
+   {Add Header}
+   AddHeader(AResponse,GetTitle,nil); 
+
+   {Add Release Name}
+   AddItem(AResponse,'Release Name:',ULTIBO_RELEASE_NAME);
+
+   {Add Release Version}
+   AddItem(AResponse,'Release Version:',ULTIBO_RELEASE_VERSION);
+
+   {Add Release Date}
+   AddItem(AResponse,'Release Date:',ULTIBO_RELEASE_DATE);
+
+   {Add Compiler Version}
+   AddBlank(AResponse);
+   AddItem(AResponse,'Compiler Version:',FPC_COMPILER_VERSION);
+
+   {Add Time (Local)}
+   AddBlank(AResponse);
+   AddItem(AResponse,'Time (Local):',NormalizedDateTimeToStr(Now));
+
+   {Add Time (UTC)}
+   AddItem(AResponse,'Time (UTC):',NormalizedDateTimeToStr(SystemFileTimeToDateTime(GetCurrentTime)));
+
+   {Add Timezone}
+   AddBlank(AResponse);
+   AddItem(AResponse,'Timezone:',GetCurrentTimezone);
+   AddBlank(AResponse);
+   AddItemEx(AResponse,'Daylight Start:',GetTimezoneDaylightStart,2);
+   AddItemEx(AResponse,'Daylight Date:',NormalizedDateTimeToStr(GetTimezoneDaylightDate),2);
+   AddBlank(AResponse);
+   AddItemEx(AResponse,'Standard Start:',GetTimezoneStandardStart,2);
+   AddItemEx(AResponse,'Standard Date:',NormalizedDateTimeToStr(GetTimezoneStandardDate),2);
+
+   //To Do //Locale
+
+   //To Do //Codepage
+
+   {Add Temperature}
+   WorkTemp:=TemperatureGetCurrent(TEMPERATURE_ID_SOC);
+   AddBlank(AResponse);
+   AddItem(AResponse,'Temperature (SoC):',FloatToStr(WorkTemp / 1000) + ' degrees Celsius');
+
+   {Add Uptime}
+   WorkTime:=SystemFileTimeToDateTime(Uptime); {No Conversion}
+   AddBlank(AResponse);
+   AddItem(AResponse,'Uptime:',NormalizedIntervalToStr(WorkTime));
+
+   {Add Shutdown / Restart}
+   AddBlank(AResponse);
+   if WEBSTATUS_ALLOW_RESTART then
+    begin
+     AddItem(AResponse,'Actions:','<button onclick="ConfirmAction(''' + Name + '?action=restart'', ''Restart system?'')" style="width: 30%; height: 100%">Restart</button>');
+    end; 
+   if WEBSTATUS_ALLOW_SHUTDOWN then
+    begin
+     AddItem(AResponse,'','<button onclick="ConfirmAction(''' + Name + '?action=shutdown'', ''Shutdown system?'')" style="width: 30%; height: 100%">Shutdown</button>');
+    end; 
+
+   {Add Footer}
+   AddFooter(AResponse); 
+  end;
+
  {Return Result}
  Result:=True;
 end;
@@ -1978,6 +2176,30 @@ end;
 
 {==============================================================================}
 
+function TWebStatusSub.NormalizedDateToStr(const DateTime:TDateTime):String;
+begin
+ {}
+ Result:='';
+
+ if FMain = nil then Exit;
+
+ Result:=FMain.NormalizedDateToStr(DateTime);
+end;
+
+{==============================================================================}
+
+function TWebStatusSub.NormalizedTimeToStr(const DateTime:TDateTime):String;
+begin
+ {}
+ Result:='';
+
+ if FMain = nil then Exit;
+
+ Result:=FMain.NormalizedTimeToStr(DateTime);
+end;
+
+{==============================================================================}
+
 function TWebStatusSub.NormalizedDateTimeToStr(const DateTime:TDateTime):String;
 begin
  {}
@@ -1987,7 +2209,19 @@ begin
 
  Result:=FMain.NormalizedDateTimeToStr(DateTime);
 end;
- 
+
+{==============================================================================}
+
+function TWebStatusSub.NormalizedIntervalToStr(const DateTime:TDateTime):String;
+begin
+ {}
+ Result:='';
+
+ if FMain = nil then Exit;
+
+ Result:=FMain.NormalizedIntervalToStr(DateTime);
+end;
+
 {==============================================================================}
 
 function TWebStatusSub.MakeBold(const AName:String):String;
@@ -2794,6 +3028,7 @@ begin
  AddItemEx(AResponse,'ReallocRemoveFailCount:',IntToStr(Statistics.ReallocRemoveFailCount),3);
  {GetAligned Internal}
  AddBlank(AResponse);
+ AddItemEx(AResponse,'GetAlignedZeroCount:',IntToStr(Statistics.GetAlignedZeroCount),3);
  AddItemEx(AResponse,'GetAlignedRemainCount:',IntToStr(Statistics.GetAlignedRemainCount),3);
  AddItemEx(AResponse,'GetAlignedInvalidCount:',IntToStr(Statistics.GetAlignedInvalidCount),3);
  AddItemEx(AResponse,'GetAlignedUndersizeCount:',IntToStr(Statistics.GetAlignedUndersizeCount),3);
@@ -2801,8 +3036,6 @@ begin
  AddItemEx(AResponse,'GetAlignedAddFailCount:',IntToStr(Statistics.GetAlignedAddFailCount),3);
  AddItemEx(AResponse,'GetAlignedSplitFailCount:',IntToStr(Statistics.GetAlignedSplitFailCount),3);
  AddItemEx(AResponse,'GetAlignedRemoveFailCount:',IntToStr(Statistics.GetAlignedRemoveFailCount),3);
- AddItemEx(AResponse,'GetAlignedOrphanCount:',IntToStr(Statistics.GetAlignedOrphanCount),3);
- AddItemEx(AResponse,'GetAlignedOrphanBytes:',IntToStr(Statistics.GetAlignedOrphanBytes),3);
  AddItemEx(AResponse,'GetAlignedReleaseCount:',IntToStr(Statistics.GetAlignedReleaseCount),3);
  AddItemEx(AResponse,'GetAlignedReleaseBytes:',IntToStr(Statistics.GetAlignedReleaseBytes),3);
  {Free Internal}
@@ -2846,6 +3079,7 @@ begin
  AddBlank(AResponse);
  AddItemEx(AResponse,'GetSmallCount:',IntToStr(Statistics.GetSmallCount),3);
  AddItemEx(AResponse,'GetLargeCount:',IntToStr(Statistics.GetLargeCount),3);
+ AddItemEx(AResponse,'FindFreeCount:',IntToStr(Statistics.FindFreeCount),3);
  AddItemEx(AResponse,'AddSmallCount:',IntToStr(Statistics.AddSmallCount),3);
  AddItemEx(AResponse,'AddLargeCount:',IntToStr(Statistics.AddLargeCount),3);
  AddItemEx(AResponse,'RemoveSmallCount:',IntToStr(Statistics.RemoveSmallCount),3);
@@ -2986,7 +3220,7 @@ begin
    while Current <> nil do
     begin
      {Add Item}
-     AddItem5Column(AResponse,'0x' + AddrToHex(Current.Adddress),IntToStr(Current.Size),HeapStateToString(Current.State),FlagsToFlagName(Current.Flags),'0x' + IntToHex(Current.Affinity,8));
+     AddItem5Column(AResponse,'0x' + AddrToHex(Current.Address),IntToStr(Current.Size),HeapStateToString(Current.State),FlagsToFlagName(Current.Flags),'0x' + IntToHex(Current.Affinity,8));
    
      {Update Count}
      Inc(Count);
@@ -3020,7 +3254,7 @@ begin
    while Current <> nil do
     begin
      {Add Item}
-     AddItem5Column(AResponse,'0x' + AddrToHex(Current.Adddress),IntToStr(Current.Size),HeapStateToString(Current.State),FlagsToFlagName(Current.Flags),'0x' + IntToHex(Current.Affinity,8));
+     AddItem5Column(AResponse,'0x' + AddrToHex(Current.Address),IntToStr(Current.Size),HeapStateToString(Current.State),FlagsToFlagName(Current.Flags),'0x' + IntToHex(Current.Affinity,8));
 
      {Update Count}
      Inc(Count);
@@ -3583,7 +3817,7 @@ begin
  
  {Add Current Time}
  AddBlank(AResponse);
- AddItem(AResponse,'Current Time (UTC):',DateTimeToStr(SystemFileTimeToDateTime(GetCurrentTime)));
+ AddItem(AResponse,'Current Time (UTC):',NormalizedDateTimeToStr(SystemFileTimeToDateTime(GetCurrentTime)));
  
  {Add Footer}
  AddFooter(AResponse); 
@@ -3641,7 +3875,7 @@ begin
  AddBlank(AResponse);
 
  {Add Default Language}
- AddItem(AResponse,'Default Language:',IntToHex(GetSystemDefaultLangID,4));
+ AddItem(AResponse,'Default Language:','0x' + IntToHex(GetSystemDefaultLangID,4));
  AddBlank(AResponse);
  
  {Add Default Keymap}
@@ -4033,7 +4267,7 @@ function TWebStatusThreadList.DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;
 var
  Action:String;
  Handle:THandle;
- Count:LongWord;
+ Count:Integer;
  WorkBuffer:String;
  WorkTime:TDateTime;
  FlagNames:TStringList;
@@ -4132,13 +4366,13 @@ begin
          AddBlank(AResponse);
          
          WorkTime:=SystemFileTimeToDateTime(TFileTime(Current.CreateTime));
-         if WorkTime <> 0 then AddItem(AResponse,'CreateTime:',DateTimeToStr(WorkTime)) else AddItem(AResponse,'CreateTime:','N/A');
+         if WorkTime <> 0 then AddItem(AResponse,'CreateTime:',NormalizedDateTimeToStr(WorkTime)) else AddItem(AResponse,'CreateTime:','N/A');
          
          WorkTime:=SystemFileTimeToDateTime(TFileTime(Current.ExitTime));
-         if WorkTime <> 0 then AddItem(AResponse,'ExitTime:',DateTimeToStr(WorkTime)) else AddItem(AResponse,'ExitTime:','N/A');
+         if WorkTime <> 0 then AddItem(AResponse,'ExitTime:',NormalizedDateTimeToStr(WorkTime)) else AddItem(AResponse,'ExitTime:','N/A');
          
          WorkTime:=SystemFileTimeToDateTime(TFileTime(Current.KernelTime)); {No Conversion}
-         AddItem(AResponse,'KernelTime:',IntToStr(Trunc(WorkTime)) + ' days ' + TimeToStr(WorkTime));
+         AddItem(AResponse,'KernelTime:',NormalizedIntervalToStr(WorkTime));
          AddItem(AResponse,'SwitchCount:',IntToStr(Current.SwitchCount));
          
          FlagNames.Free;
@@ -4250,7 +4484,7 @@ begin
  AddItemEx(AResponse,'CPU Count:',IntToStr(SCHEDULER_CPU_COUNT),2);
  AddItemEx(AResponse,'CPU Mask:','0x' + IntToHex(SCHEDULER_CPU_MASK,8),2);
  AddItemEx(AResponse,'CPU Boot:',CPUIDToString(SCHEDULER_CPU_BOOT),2);
- AddItemEx(AResponse,'CPU Reserve:',IntToHex(SCHEDULER_CPU_RESERVE,8),2);
+ AddItemEx(AResponse,'CPU Reserve:','0x' + IntToHex(SCHEDULER_CPU_RESERVE,8),2);
  
  {Add Scheduler Idle/Wait/Offset}
  AddBlank(AResponse);
@@ -4329,6 +4563,10 @@ begin
    AddItemEx(AResponse,ThreadPriorityToString(Count) + ':',IntToStr(SchedulerGetPriorityQuantum(Count)),3);
   end;
  
+ {Add Scheduler Base Quantum}
+ AddBlank(AResponse);
+ AddItem(AResponse,'Scheduler Base Quantum:',IntToStr(SCHEDULER_THREAD_QUANTUM));
+
  {Add Scheduler Termination Quantum}
  AddBlank(AResponse);
  AddItem(AResponse,'Scheduler Termination Quantum:',IntToStr(SCHEDULER_TERMINATION_QUANTUM));
@@ -4514,6 +4752,38 @@ end;
 
 {==============================================================================}
 
+function TWebStatusDevices.USBHubFlagsToFlagNames(AFlags:LongWord):TStringList;
+begin
+ {}
+ Result:=TStringList.Create;
+
+ {Check Flags}
+ if (AFlags and USBHUB_FLAG_COMPOUND) = USBHUB_FLAG_COMPOUND then
+  begin
+   Result.Add('USBHUB_FLAG_COMPOUND');
+  end;
+ if (AFlags and USBHUB_FLAG_PORT_POWER) = USBHUB_FLAG_PORT_POWER then
+  begin
+   Result.Add('USBHUB_FLAG_PORT_POWER');
+  end;
+ if (AFlags and USBHUB_FLAG_PORT_PROTECTION) = USBHUB_FLAG_PORT_PROTECTION then
+  begin
+   Result.Add('USBHUB_FLAG_PORT_PROTECTION');
+  end;
+ if (AFlags and USBHUB_FLAG_MULTI_TRANSLATOR) = USBHUB_FLAG_MULTI_TRANSLATOR then
+  begin
+   Result.Add('USBHUB_FLAG_MULTI_TRANSLATOR');
+  end;
+
+ {Check Flags}
+ if Result.Count = 0 then
+  begin
+   Result.Add('USBHUB_FLAG_NONE');
+  end; 
+end;
+
+{==============================================================================}
+
 function TWebStatusDevices.USBHostFlagsToFlagNames(AFlags:LongWord):TStringList;
 begin
  {}
@@ -4574,6 +4844,23 @@ begin
  if Result.Count = 0 then
   begin
    Result.Add('PCIHOST_FLAG_NONE');
+  end; 
+end;
+
+{==============================================================================}
+
+function TWebStatusDevices.HIDFlagsToFlagNames(AFlags:LongWord):TStringList;
+begin
+ {}
+ Result:=TStringList.Create;
+
+ {Check Flags}
+ {Nothing}
+
+ {Check Flags}
+ if Result.Count = 0 then
+  begin
+   Result.Add('HID_FLAG_NONE');
   end; 
 end;
 
@@ -4953,6 +5240,22 @@ begin
   begin
    Result.Add('MOUSE_FLAG_PEEK_BUFFER');
   end;
+ if (AFlags and MOUSE_FLAG_SWAP_XY) = MOUSE_FLAG_SWAP_XY then
+  begin
+   Result.Add('MOUSE_FLAG_SWAP_XY');
+  end;
+ if (AFlags and MOUSE_FLAG_INVERT_X) = MOUSE_FLAG_INVERT_X then
+  begin
+   Result.Add('MOUSE_FLAG_INVERT_X');
+  end;
+ if (AFlags and MOUSE_FLAG_INVERT_Y) = MOUSE_FLAG_INVERT_Y then
+  begin
+   Result.Add('MOUSE_FLAG_INVERT_Y');
+  end;
+ if (AFlags and MOUSE_FLAG_SWAP_MAX_XY) = MOUSE_FLAG_SWAP_MAX_XY then
+  begin
+   Result.Add('MOUSE_FLAG_SWAP_MAX_XY');
+  end;
 
  {Check Flags}
  if Result.Count = 0 then
@@ -4988,6 +5291,22 @@ begin
  if (AFlags and TOUCH_FLAG_PRESSURE) = TOUCH_FLAG_PRESSURE then
   begin
    Result.Add('TOUCH_FLAG_PRESSURE');
+  end;
+ if (AFlags and TOUCH_FLAG_SWAP_XY) = TOUCH_FLAG_SWAP_XY then
+  begin
+   Result.Add('TOUCH_FLAG_SWAP_XY');
+  end;
+ if (AFlags and TOUCH_FLAG_INVERT_X) = TOUCH_FLAG_INVERT_X then
+  begin
+   Result.Add('TOUCH_FLAG_INVERT_X');
+  end;
+ if (AFlags and TOUCH_FLAG_INVERT_Y) = TOUCH_FLAG_INVERT_Y then
+  begin
+   Result.Add('TOUCH_FLAG_INVERT_Y');
+  end;
+ if (AFlags and TOUCH_FLAG_SWAP_MAX_XY) = TOUCH_FLAG_SWAP_MAX_XY then
+  begin
+   Result.Add('TOUCH_FLAG_SWAP_MAX_XY');
   end;
 
  {Check Flags}
@@ -5263,7 +5582,6 @@ end;
 
 {==============================================================================}
 
-
 function TWebStatusDevices.KeyboardFlagsToFlagNames(AFlags:LongWord):TStringList; 
 begin
  {}
@@ -5287,6 +5605,50 @@ begin
  if Result.Count = 0 then
   begin
    Result.Add('KEYBOARD_FLAG_NONE');
+  end; 
+end;
+
+{==============================================================================}
+
+function TWebStatusDevices.JoystickFlagsToFlagNames(AFlags:LongWord):TStringList;
+begin
+ {}
+ Result:=TStringList.Create;
+ 
+ {Check Flags}
+ if (AFlags and JOYSTICK_FLAG_NON_BLOCK) = JOYSTICK_FLAG_NON_BLOCK then
+  begin
+   Result.Add('JOYSTICK_FLAG_NON_BLOCK');
+  end;
+ if (AFlags and JOYSTICK_FLAG_PEEK_BUFFER) = JOYSTICK_FLAG_PEEK_BUFFER then
+  begin
+   Result.Add('JOYSTICK_FLAG_PEEK_BUFFER');
+  end;
+ if (AFlags and JOYSTICK_FLAG_LED) = JOYSTICK_FLAG_LED then
+  begin
+   Result.Add('JOYSTICK_FLAG_LED');
+  end;
+ if (AFlags and JOYSTICK_FLAG_RGBLED) = JOYSTICK_FLAG_RGBLED then
+  begin
+   Result.Add('JOYSTICK_FLAG_RGBLED');
+  end;
+ if (AFlags and JOYSTICK_FLAG_RUMBLE) = JOYSTICK_FLAG_RUMBLE then
+  begin
+   Result.Add('JOYSTICK_FLAG_RUMBLE');
+  end;
+ if (AFlags and JOYSTICK_FLAG_GYROSCOPE) = JOYSTICK_FLAG_GYROSCOPE then
+  begin
+   Result.Add('JOYSTICK_FLAG_GYROSCOPE');
+  end;
+ if (AFlags and JOYSTICK_FLAG_TOUCHPAD) = JOYSTICK_FLAG_TOUCHPAD then
+  begin
+   Result.Add('JOYSTICK_FLAG_TOUCHPAD');
+  end;
+
+ {Check Flags}
+ if Result.Count = 0 then
+  begin
+   Result.Add('JOYSTICK_FLAG_NONE');
   end; 
 end;
 
@@ -5653,12 +6015,13 @@ var
  Id:LongWord;
  Action:String;
  Device:PDevice;
- Count:LongWord;
+ Count:Integer;
  WorkBuffer:String;
  Data:TWebStatusData;
  FlagNames:TStringList;
  StatusNames:TStringList;
  
+ USBHub:PUSBHub;
  DMAHost:PDMAHost;
  USBHost:PUSBHost;
  PCIHost:PPCIHost;
@@ -5666,6 +6029,7 @@ var
  MMCDevice:PMMCDevice;
  USBDevice:PUSBDevice;
  PCIDevice:PPCIDevice;
+ HIDDevice:PHIDDevice;
  I2CDevice:PI2CDevice;
  SPIDevice:PSPIDevice;
  PWMDevice:PPWMDevice;
@@ -5684,6 +6048,7 @@ var
  NetworkDevice:PNetworkDevice;
  StorageDevice:PStorageDevice;
  KeyboardDevice:PKeyboardDevice;
+ JoystickDevice:PJoystickDevice;
  ConsoleDevice:PConsoleDevice;
  FramebufferDevice:PFramebufferDevice;
  
@@ -6095,6 +6460,7 @@ begin
         Data.Host:=AHost;
         Data.Request:=ARequest;
         Data.Response:=AResponse;
+        Data.ContentStream:=nil;
         Data.Data:=nil;
         
         {Enumerate Windows}
@@ -6239,10 +6605,10 @@ begin
         AddBlank(AResponse);
         AddItem(AResponse,'Receive Count:',IntToStr(SerialDevice.ReceiveCount));
         AddItem(AResponse,'Receive Errors:',IntToStr(SerialDevice.ReceiveErrors));
-        AddItem(AResponse,'ReceiveOverruns:',IntToStr(SerialDevice.ReceiveOverruns));
+        AddItem(AResponse,'Receive Overruns:',IntToStr(SerialDevice.ReceiveOverruns));
         AddItem(AResponse,'Transmit Count:',IntToStr(SerialDevice.TransmitCount));
         AddItem(AResponse,'Transmit Errors:',IntToStr(SerialDevice.TransmitErrors));
-        AddItem(AResponse,'TransmitOverruns:',IntToStr(SerialDevice.TransmitOverruns));
+        AddItem(AResponse,'Transmit Overruns:',IntToStr(SerialDevice.TransmitOverruns));
         AddBlank(AResponse);
       
         {Get Properties}
@@ -6519,13 +6885,7 @@ begin
         AddItem(AResponse,'Id:',IntToStr(StorageDevice.StorageId));
         AddItem(AResponse,'State:',StorageDeviceStateToString(StorageDevice.StorageState));
         AddBlank(AResponse);
-        AddItem(AResponse,'Read Count:',IntToStr(StorageDevice.ReadCount));
-        AddItem(AResponse,'Read Errors:',IntToStr(StorageDevice.ReadErrors));
-        AddItem(AResponse,'Write Count:',IntToStr(StorageDevice.WriteCount));
-        AddItem(AResponse,'Write Errors:',IntToStr(StorageDevice.WriteErrors));
-        AddItem(AResponse,'Erase Count:',IntToStr(StorageDevice.EraseCount));
-        AddItem(AResponse,'Erase Errors:',IntToStr(StorageDevice.EraseErrors));
-        AddBlank(AResponse);
+
         AddItem(AResponse,'Target ID:',IntToStr(StorageDevice.TargetID));
         AddItem(AResponse,'Target LUN:',IntToStr(StorageDevice.TargetLUN));
         AddItem(AResponse,'Block Size:',IntToStr(StorageDevice.BlockSize) + ' Bytes');
@@ -6535,7 +6895,15 @@ begin
         AddItem(AResponse,'Product:',String(StorageDevice.Product));
         AddItem(AResponse,'Revision:',String(StorageDevice.Revision));
         AddBlank(AResponse);
-        
+
+        AddItem(AResponse,'Read Count:',IntToStr(StorageDevice.ReadCount));
+        AddItem(AResponse,'Read Errors:',IntToStr(StorageDevice.ReadErrors));
+        AddItem(AResponse,'Write Count:',IntToStr(StorageDevice.WriteCount));
+        AddItem(AResponse,'Write Errors:',IntToStr(StorageDevice.WriteErrors));
+        AddItem(AResponse,'Erase Count:',IntToStr(StorageDevice.EraseCount));
+        AddItem(AResponse,'Erase Errors:',IntToStr(StorageDevice.EraseErrors));
+        AddBlank(AResponse);
+
         FlagNames.Free;
        end;
       DEVICE_CLASS_KEYBOARD:begin      
@@ -6564,6 +6932,11 @@ begin
         AddItem(AResponse,'Id:',IntToStr(KeyboardDevice.KeyboardId));
         AddItem(AResponse,'State:',KeyboardDeviceStateToString(KeyboardDevice.KeyboardState));
         AddBlank(AResponse);
+
+        AddItem(AResponse,'Repeat Rate:',IntToStr(KeyboardDevice.KeyboardRate) + ' Milliseconds');
+        AddItem(AResponse,'Repeat Delay:',IntToStr(KeyboardDevice.KeyboardDelay * KeyboardDevice.KeyboardRate) + ' Milliseconds');
+        AddBlank(AResponse);
+
         AddItem(AResponse,'Receive Count:',IntToStr(KeyboardDevice.ReceiveCount));
         AddItem(AResponse,'Receive Errors:',IntToStr(KeyboardDevice.ReceiveErrors));
         AddItem(AResponse,'Buffer Overruns:',IntToStr(KeyboardDevice.BufferOverruns));
@@ -6597,6 +6970,14 @@ begin
         AddItem(AResponse,'Id:',IntToStr(MouseDevice.MouseId));
         AddItem(AResponse,'State:',MouseDeviceStateToString(MouseDevice.MouseState));
         AddBlank(AResponse);
+
+        AddItem(AResponse,'Rate:',IntToStr(MouseDevice.MouseRate) + ' Samples per second');
+        AddItem(AResponse,'Rotation:',MouseDeviceRotationToString(MouseDevice.Properties.Rotation));
+        AddItem(AResponse,'Max X:',IntToStr(MouseDevice.Properties.MaxX));
+        AddItem(AResponse,'Max Y:',IntToStr(MouseDevice.Properties.MaxY));
+        AddItem(AResponse,'Max Wheel:',IntToStr(MouseDevice.Properties.MaxWheel));
+        AddBlank(AResponse);
+
         AddItem(AResponse,'Receive Count:',IntToStr(MouseDevice.ReceiveCount));
         AddItem(AResponse,'Receive Errors:',IntToStr(MouseDevice.ReceiveErrors));
         AddItem(AResponse,'Buffer Overruns:',IntToStr(MouseDevice.BufferOverruns));
@@ -6630,11 +7011,94 @@ begin
         AddItem(AResponse,'Id:',IntToStr(TouchDevice.TouchId));
         AddItem(AResponse,'State:',TouchDeviceStateToString(TouchDevice.TouchState));
         AddBlank(AResponse);
+
+        AddItem(AResponse,'Width:',IntToStr(TouchDevice.Properties.Width));
+        AddItem(AResponse,'Height:',IntToStr(TouchDevice.Properties.Height));
+        AddItem(AResponse,'Rotation:',TouchDeviceRotationToString(TouchDevice.Properties.Rotation));
+        AddItem(AResponse,'Max X:',IntToStr(TouchDevice.Properties.MaxX));
+        AddItem(AResponse,'Max Y:',IntToStr(TouchDevice.Properties.MaxY));
+        AddItem(AResponse,'Max Z:',IntToStr(TouchDevice.Properties.MaxZ));
+        AddItem(AResponse,'Max Width:',IntToStr(TouchDevice.Properties.MaxWidth));
+        AddItem(AResponse,'Max Height:',IntToStr(TouchDevice.Properties.MaxHeight));
+        AddItem(AResponse,'Max Points:',IntToStr(TouchDevice.Properties.MaxPoints));
+        AddBlank(AResponse);
+
         AddItem(AResponse,'Receive Count:',IntToStr(TouchDevice.ReceiveCount));
         AddItem(AResponse,'Receive Errors:',IntToStr(TouchDevice.ReceiveErrors));
         AddItem(AResponse,'Buffer Overruns:',IntToStr(TouchDevice.BufferOverruns));
         AddBlank(AResponse);
         
+        FlagNames.Free;
+       end;
+      DEVICE_CLASS_JOYSTICK:begin
+        {Get Flags Names}
+        FlagNames:=JoystickFlagsToFlagNames(Device.DeviceFlags);
+
+        {Get Joystick}
+        JoystickDevice:=PJoystickDevice(Device);
+
+        AddBold(AResponse,'Joystick','');
+        AddBlank(AResponse);
+        AddItem(AResponse,'Type:',JoystickDeviceTypeToString(Device.DeviceType));
+        AddItem(AResponse,'Flags:',FlagNames.Strings[0]);
+
+        {Check Flag Count}
+        if FlagNames.Count > 1 then
+         begin
+          for Count:=1 to FlagNames.Count - 1 do
+           begin
+            {Add Flag Name}
+            AddItem(AResponse,'',FlagNames.Strings[Count]);
+           end;
+         end;
+
+        AddBlank(AResponse);
+        AddItem(AResponse,'Id:',IntToStr(JoystickDevice.JoystickId));
+        AddItem(AResponse,'State:',JoystickDeviceStateToString(JoystickDevice.JoystickState));
+        AddBlank(AResponse);
+
+        AddItem(AResponse,'Axis Count:',IntToStr(JoystickDevice.Properties.AxisCount));
+        for Count:=0 to JoystickDevice.Properties.AxisCount - 1 do
+         begin
+          AddItem(AResponse,'Axis ' + IntToStr(Count + 1),'');
+          AddItemEx(AResponse,'Name:',JoystickDeviceAxisToString(JoystickDevice.Properties.Axes[Count].Name),5);
+          AddItemEx(AResponse,'Logical Minimum:',IntToStr(JoystickDevice.Properties.Axes[Count].Logical.Minimum),5);
+          AddItemEx(AResponse,'Logical Maximum:',IntToStr(JoystickDevice.Properties.Axes[Count].Logical.Maximum),5);
+          AddItemEx(AResponse,'Physical Minimum:',IntToStr(JoystickDevice.Properties.Axes[Count].Physical.Minimum),5);
+          AddItemEx(AResponse,'Physical Maximum:',IntToStr(JoystickDevice.Properties.Axes[Count].Physical.Maximum),5);
+          AddItemEx(AResponse,'Multiplier:',FloatToStr(JoystickDevice.Properties.Axes[Count].Multiplier),5);
+          AddItemEx(AResponse,'Resolution:',FloatToStr(JoystickDevice.Properties.Axes[Count].Resolution),5);
+          AddBlank(AResponse);
+         end;
+        if JoystickDevice.Properties.AxisCount = 0 then AddBlank(AResponse);
+
+        AddItem(AResponse,'Hat Count:',IntToStr(JoystickDevice.Properties.HatCount));
+        for Count:=0 to JoystickDevice.Properties.HatCount - 1 do
+         begin
+          AddItem(AResponse,'Hat ' + IntToStr(Count + 1),'');
+          AddItemEx(AResponse,'Name:',JoystickDeviceHatToString(JoystickDevice.Properties.Hats[Count].Name),5);
+          AddItemEx(AResponse,'Logical Minimum:',IntToStr(JoystickDevice.Properties.Hats[Count].Logical.Minimum),5);
+          AddItemEx(AResponse,'Logical Maximum:',IntToStr(JoystickDevice.Properties.Hats[Count].Logical.Maximum),5);
+          AddItemEx(AResponse,'Physical Minimum:',IntToStr(JoystickDevice.Properties.Hats[Count].Physical.Minimum),5);
+          AddItemEx(AResponse,'Physical Maximum:',IntToStr(JoystickDevice.Properties.Hats[Count].Physical.Maximum),5);
+          AddItemEx(AResponse,'Multiplier:',FloatToStr(JoystickDevice.Properties.Hats[Count].Multiplier),5);
+          AddItemEx(AResponse,'Resolution:',FloatToStr(JoystickDevice.Properties.Hats[Count].Resolution),5);
+          AddBlank(AResponse);
+         end;
+        if JoystickDevice.Properties.HatCount = 0 then AddBlank(AResponse);
+
+        AddItem(AResponse,'Button Count:',IntToStr(JoystickDevice.Properties.ButtonCount));
+        for Count:=0 to JoystickDevice.Properties.ButtonCount - 1 do
+         begin
+          AddItem(AResponse,'Button ' + IntToStr(Count + 1) + ':',JoystickDeviceButtonToString(JoystickDevice.Properties.Buttons[Count]));
+         end;
+        AddBlank(AResponse);
+
+        AddItem(AResponse,'Receive Count:',IntToStr(JoystickDevice.ReceiveCount));
+        AddItem(AResponse,'Receive Errors:',IntToStr(JoystickDevice.ReceiveErrors));
+        AddItem(AResponse,'Buffer Overruns:',IntToStr(JoystickDevice.BufferOverruns));
+        AddBlank(AResponse);
+
         FlagNames.Free;
        end;
       DEVICE_CLASS_RTC:begin
@@ -6663,8 +7127,8 @@ begin
         AddItem(AResponse,'Id:',IntToStr(RTCDevice.RTCId));
         AddItem(AResponse,'State:',RTCDeviceStateToString(RTCDevice.RTCState));
         AddBlank(AResponse);
-        AddItem(AResponse,'Min Time:',DateTimeToStr(SystemFileTimeToDateTime(TFileTime(RTCDevice.Properties.MinTime))));
-        AddItem(AResponse,'Max Time:',DateTimeToStr(SystemFileTimeToDateTime(TFileTime(RTCDevice.Properties.MaxTime))));
+        AddItem(AResponse,'Min Time:',NormalizedDateTimeToStr(SystemFileTimeToDateTime(TFileTime(RTCDevice.Properties.MinTime))));
+        AddItem(AResponse,'Max Time:',NormalizedDateTimeToStr(SystemFileTimeToDateTime(TFileTime(RTCDevice.Properties.MaxTime))));
         AddItem(AResponse,'Alarm Count:',IntToStr(RTCDevice.Properties.AlarmCount));
         AddBlank(AResponse);
         AddItem(AResponse,'Get Count:',IntToStr(RTCDevice.GetCount));
@@ -6705,8 +7169,21 @@ begin
         WorkBuffer:=MMCBusWidthToString(MMCDevice.BusWidth);
         if MMCIsSD(MMCDevice) then WorkBuffer:=SDBusWidthToString(MMCDevice.BusWidth);
         AddItem(AResponse,'Bus Width:',WorkBuffer);
+        AddItem(AResponse,'Driver Type:',MMCDriverTypeToString(MMCDevice.DriverType));
+        AddItem(AResponse,'Signal Voltage:',MMCSignalVoltageToString(MMCDevice.SignalVoltage)); 
         AddBlank(AResponse);
-     
+
+        AddItem(AResponse,'Erase Size:',IntToStr(MMCDevice.EraseSize));
+        AddItem(AResponse,'Erase Shift:',IntToStr(MMCDevice.EraseShift));
+        AddItem(AResponse,'Erase Argument:','0x' + IntToHex(MMCDevice.EraseArgument,8));
+        AddItem(AResponse,'Preferred Erase Size:',IntToStr(MMCDevice.PreferredEraseSize));
+        AddItem(AResponse,'Enhanced Strobe:',BooleanToString(MMCDevice.EnhancedStrobe));
+        AddBlank(AResponse);
+
+        WorkBuffer:='None';
+        if MMCDevice.Storage <> nil then WorkBuffer:=DeviceGetName(@MMCDevice.Storage.Device);
+        AddItem(AResponse,'Storage:',WorkBuffer);
+
         FlagNames.Free;
        end;
       DEVICE_CLASS_SDHCI:begin
@@ -6810,7 +7287,7 @@ begin
         if USBDevice.Parent <> nil then WorkBuffer:=DeviceGetName(@USBDevice.Parent.Device);
         AddItem(AResponse,'Parent:',WorkBuffer);
         
-        WorkBuffer:='';
+        WorkBuffer:='None (see Interfaces)';
         if USBDevice.Driver <> nil then WorkBuffer:=DriverGetName(@USBDevice.Driver.Driver);
         
         AddItem(AResponse,'Driver:',WorkBuffer);
@@ -6829,9 +7306,39 @@ begin
         FlagNames.Free;
        end;
       DEVICE_CLASS_USBHUB:begin
+        {Get Flags Names}
+        FlagNames:=USBHubFlagsToFlagNames(Device.DeviceFlags);
+      
+        {Get USBHub}
+        USBHub:=PUSBHub(Device);
         
-        //To Do //
-        
+        AddBold(AResponse,'USB Hub','');
+        AddBlank(AResponse);
+        AddItem(AResponse,'Type:',USBHubTypeToString(Device.DeviceType));
+        AddItem(AResponse,'Flags:',FlagNames.Strings[0]);
+      
+        {Check Flag Count}
+        if FlagNames.Count > 1 then
+         begin
+          for Count:=1 to FlagNames.Count - 1 do
+           begin
+            {Add Flag Name}
+            AddItem(AResponse,'',FlagNames.Strings[Count]);
+           end;
+         end;
+       
+        AddBlank(AResponse);
+        AddItem(AResponse,'Id:',IntToStr(USBHub.HubId));
+        AddItem(AResponse,'State:',USBHubStateToString(USBHub.HubState));
+        AddBlank(AResponse);
+        AddItem(AResponse,'Port Count:',IntToStr(Length(USBHub.Ports)));
+        AddBlank(AResponse);
+
+        AddItem(AResponse,'Receive Count:',IntToStr(USBHub.ReceiveCount));
+        AddItem(AResponse,'Receive Errors:',IntToStr(USBHub.ReceiveErrors));
+        AddBlank(AResponse);
+
+        FlagNames.Free;
        end;
       DEVICE_CLASS_USBHOST:begin
         {Get Flags Names}
@@ -6903,7 +7410,7 @@ begin
         if PCIDevice.Parent <> nil then WorkBuffer:=DeviceGetName(@PCIDevice.Parent.Device);
         AddItem(AResponse,'Parent:',WorkBuffer);
    
-        WorkBuffer:='';
+        WorkBuffer:='None';
         if PCIDevice.Driver <> nil then WorkBuffer:=DriverGetName(@PCIDevice.Driver.Driver);
         AddItem(AResponse,'Driver:',WorkBuffer);
    
@@ -6941,6 +7448,48 @@ begin
        
         FlagNames.Free;
        end;
+      DEVICE_CLASS_HID:begin
+        {Get Flags Names}
+        FlagNames:=HIDFlagsToFlagNames(Device.DeviceFlags);
+
+        {Get HID}
+        HIDDevice:=PHIDDevice(Device);
+
+        AddBold(AResponse,'HID','');
+        AddBlank(AResponse);
+        AddItem(AResponse,'Type:',HIDDeviceTypeToString(Device.DeviceType));
+        AddItem(AResponse,'Flags:',FlagNames.Strings[0]);
+
+        {Check Flag Count}
+        if FlagNames.Count > 1 then
+         begin
+          for Count:=1 to FlagNames.Count - 1 do
+           begin
+            {Add Flag Name}
+            AddItem(AResponse,'',FlagNames.Strings[Count]);
+           end;
+         end;
+
+        AddBlank(AResponse);
+        AddItem(AResponse,'Id:',IntToStr(HIDDevice.HIDId));
+        AddItem(AResponse,'State:',HIDDeviceStateToString(HIDDevice.HIDState));
+        AddBlank(AResponse);
+
+        WorkBuffer:='None (see Collections)';
+        if HIDDevice.Consumer <> nil then WorkBuffer:=DriverGetName(@HIDDevice.Consumer.Driver);
+        AddItem(AResponse,'Consumer:',WorkBuffer);
+        AddBlank(AResponse);
+
+        AddItem(AResponse,'Collection Count:',IntToStr(HIDDevice.CollectionCount));
+        AddItem(AResponse,'Descriptor Size:',IntToStr(HIDDevice.DescriptorSize));
+        AddBlank(AResponse);
+
+        AddItem(AResponse,'Receive Count:',IntToStr(HIDDevice.ReceiveCount));
+        AddItem(AResponse,'Receive Errors:',IntToStr(HIDDevice.ReceiveErrors));
+        AddBlank(AResponse);
+
+        FlagNames.Free;
+       end;
      end;
     end
    else
@@ -6965,6 +7514,7 @@ begin
    Data.Host:=AHost;
    Data.Request:=ARequest;
    Data.Response:=AResponse;
+   Data.ContentStream:=nil;
    Data.Data:=nil;
    
    {Enumerate Devices}
@@ -7021,6 +7571,7 @@ begin
  Data.Host:=AHost;
  Data.Request:=ARequest;
  Data.Response:=AResponse;
+ Data.ContentStream:=nil;
  Data.Data:=nil;
  
  {Enumerate Drivers}
@@ -7100,6 +7651,7 @@ begin
  Data.Host:=AHost;
  Data.Request:=ARequest;
  Data.Response:=AResponse;
+ Data.ContentStream:=nil;
  Data.Data:=nil;
  
  {Enumerate Handles}
@@ -7172,13 +7724,15 @@ function TWebStatusUSB.DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;ARespon
 var
  Id:LongWord;
  Action:String;
- Count:LongWord;
+ Count:Integer;
  WorkBuffer:String;
  Data:TWebStatusData;
  FlagNames:TStringList;
  
  USBHost:PUSBHost;
  USBDevice:PUSBDevice;
+ USBTree:TMemoryStream;
+ USBDescriptors:TMemoryStream;
 begin
  {}
  Result:=False;
@@ -7246,7 +7800,7 @@ begin
      if USBDevice.Parent <> nil then WorkBuffer:=DeviceGetName(@USBDevice.Parent.Device);
      AddItem(AResponse,'Parent:',WorkBuffer);
 
-     WorkBuffer:='';
+     WorkBuffer:='None (see Interfaces)';
      if USBDevice.Driver <> nil then WorkBuffer:=DriverGetName(@USBDevice.Driver.Driver);
      AddItem(AResponse,'Driver:',WorkBuffer);
 
@@ -7262,7 +7816,7 @@ begin
      AddItem(AResponse,'VID/PID:',IntToHex(USBDevice.Descriptor.idVendor,4) + ':' + IntToHex(USBDevice.Descriptor.idProduct,4));
      AddBlank(AResponse);
     
-     AddBold(AResponse,'Device Descriptors','');
+     AddBold(AResponse,'Device Descriptors','<button type="submit" onclick="window.open(''' + Name + '?action=usbdescriptors&id=' + IntToStr(USBDevice.USBId) + ''')" style="width: 30%; height: 100%">Save to File</button>');
      AddBlank(AResponse);
      
      {Setup Data}
@@ -7270,6 +7824,7 @@ begin
      Data.Host:=AHost;
      Data.Request:=ARequest;
      Data.Response:=AResponse;
+     Data.ContentStream:=nil;
      Data.Data:=nil;
      
      {Display Device}
@@ -7284,6 +7839,60 @@ begin
    
    {Add Footer}
    AddFooter(AResponse); 
+  end
+ else if (Action = 'USBDESCRIPTORS') and (Length(WorkBuffer) > 0) then
+  begin
+   {Get Id}
+   Id:=StrToIntDef(WorkBuffer,0);
+
+   {Get USB Device}
+   USBDevice:=USBDeviceFind(Id);
+   if USBDevice <> nil then
+    begin
+     {Create Stream}
+     USBDescriptors:=TMemoryStream.Create;
+
+     {Success}
+     AResponse.Version:=HTTP_VERSION;
+     AResponse.Status:=HTTP_STATUS_OK;
+     AResponse.Reason:=HTTP_REASON_200;
+
+     {Setup Data}
+     Data.Document:=Self;
+     Data.Host:=AHost;
+     Data.Request:=ARequest;
+     Data.Response:=AResponse;
+     Data.ContentStream:=USBDescriptors;
+     Data.Data:=nil;
+
+     {Store Device}
+     USBLogDevicesEx(USBDevice,WebStatusUSBLogOutput,WebStatusUSBLogDeviceCallback,nil,@Data);
+     USBDescriptors.Position:=0;
+
+     {Set File Name}
+     AResponse.SetHeader(HTTP_ENTITY_HEADER_CONTENT_DISPOSITION,'attachment;filename=USB_Descriptors_' + IntToHex(USBDevice.Descriptor.idVendor,4) + '_' + IntToHex(USBDevice.Descriptor.idProduct,4) + '.txt');
+
+     {Set Content Type}
+     AResponse.SetHeader(HTTP_ENTITY_HEADER_CONTENT_TYPE,HTTP_MIME_TYPE_DEFAULT);
+
+     {Set No Cache}
+     AResponse.NoCache:=True;
+
+     {Set Content}
+     AResponse.ContentStream:=USBDescriptors;
+
+     {Server will free the stream after send}
+    end
+   else
+    begin
+     {Add Header (2 column with Caption)}
+     AddHeaderEx(AResponse,GetTitle,'USB Device Descriptors',Self,2);
+
+     AddItem(AResponse,'Not Found','');
+
+     {Add Footer}
+     AddFooter(AResponse);
+    end;
   end
  else if (Action = 'USBHOST') and (Length(WorkBuffer) > 0) then
   begin
@@ -7329,7 +7938,7 @@ begin
      AddItem(AResponse,'Request Errors:',IntToStr(USBHost.RequestErrors));
      AddBlank(AResponse);
      
-     AddBold(AResponse,'Device Tree','');
+     AddBold(AResponse,'Device Tree','<button type="submit" onclick="window.open(''' + Name + '?action=usbtree&id=' + IntToStr(USBHost.HostId) + ''')" style="width: 30%; height: 100%">Save to File</button>');
      AddBlank(AResponse);
      
      {Setup Data}
@@ -7337,6 +7946,7 @@ begin
      Data.Host:=AHost;
      Data.Request:=ARequest;
      Data.Response:=AResponse;
+     Data.ContentStream:=nil;
      Data.Data:=USBHost;
      
      {Display Tree}
@@ -7351,6 +7961,60 @@ begin
    
    {Add Footer}
    AddFooter(AResponse); 
+  end
+ else if (Action = 'USBTREE') and (Length(WorkBuffer) > 0) then
+  begin
+   {Get Id}
+   Id:=StrToIntDef(WorkBuffer,0);
+
+   {Get USB Host}
+   USBHost:=USBHostFind(Id);
+   if USBHost <> nil then
+    begin
+     {Create Stream}
+     USBTree:=TMemoryStream.Create;
+
+     {Success}
+     AResponse.Version:=HTTP_VERSION;
+     AResponse.Status:=HTTP_STATUS_OK;
+     AResponse.Reason:=HTTP_REASON_200;
+
+     {Setup Data}
+     Data.Document:=Self;
+     Data.Host:=AHost;
+     Data.Request:=ARequest;
+     Data.Response:=AResponse;
+     Data.ContentStream:=USBTree;
+     Data.Data:=USBHost;
+
+     {Store Tree}
+     USBLogDevicesEx(nil,WebStatusUSBLogOutput,nil,WebStatusUSBLogTreeCallback,@Data);
+     USBTree.Position:=0;
+
+     {Set File Name}
+     AResponse.SetHeader(HTTP_ENTITY_HEADER_CONTENT_DISPOSITION,'attachment;filename=USB_Tree.txt');
+
+     {Set Content Type}
+     AResponse.SetHeader(HTTP_ENTITY_HEADER_CONTENT_TYPE,HTTP_MIME_TYPE_DEFAULT);
+
+     {Set No Cache}
+     AResponse.NoCache:=True;
+
+     {Set Content}
+     AResponse.ContentStream:=USBTree;
+    
+     {Server will free the stream after send}
+    end
+   else
+    begin
+     {Add Header (2 column with Caption)}
+     AddHeaderEx(AResponse,GetTitle,'USB Device Tree',Self,2);
+
+     AddItem(AResponse,'Not Found','');
+
+     {Add Footer}
+     AddFooter(AResponse);
+    end;
   end
  else
   begin 
@@ -7368,6 +8032,7 @@ begin
    Data.Host:=AHost;
    Data.Request:=ARequest;
    Data.Response:=AResponse;
+   Data.ContentStream:=nil;
    Data.Data:=nil;
    
    {Enumerate USB Devices}
@@ -7385,6 +8050,7 @@ begin
    Data.Host:=AHost;
    Data.Request:=ARequest;
    Data.Response:=AResponse;
+   Data.ContentStream:=nil;
    Data.Data:=nil;
    
    {Enumerate USB Hosts}
@@ -7402,6 +8068,7 @@ begin
    Data.Host:=AHost;
    Data.Request:=ARequest;
    Data.Response:=AResponse;
+   Data.ContentStream:=nil;
    Data.Data:=nil;
    
    {Enumerate USB Drivers}
@@ -7475,7 +8142,7 @@ function TWebStatusPCI.DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;ARespon
 var
  Id:LongWord;
  Action:String;
- Count:LongWord;
+ Count:Integer;
  WorkBuffer:String;
  Data:TWebStatusData;
  FlagNames:TStringList;
@@ -7545,7 +8212,7 @@ begin
      if PCIDevice.Parent <> nil then WorkBuffer:=DeviceGetName(@PCIDevice.Parent.Device);
      AddItem(AResponse,'Parent:',WorkBuffer);
 
-     WorkBuffer:='';
+     WorkBuffer:='None';
      if PCIDevice.Driver <> nil then WorkBuffer:=DriverGetName(@PCIDevice.Driver.Driver);
      AddItem(AResponse,'Driver:',WorkBuffer);
 
@@ -7625,6 +8292,7 @@ begin
    Data.Host:=AHost;
    Data.Request:=ARequest;
    Data.Response:=AResponse;
+   Data.ContentStream:=nil;
    Data.Data:=nil;
    
    {Enumerate PCI Devices}
@@ -7642,6 +8310,7 @@ begin
    Data.Host:=AHost;
    Data.Request:=ARequest;
    Data.Response:=AResponse;
+   Data.ContentStream:=nil;
    Data.Data:=nil;
    
    {Enumerate PCI Hosts}
@@ -7659,6 +8328,7 @@ begin
    Data.Host:=AHost;
    Data.Request:=ARequest;
    Data.Response:=AResponse;
+   Data.ContentStream:=nil;
    Data.Data:=nil;
    
    {Enumerate PCI Drivers}
@@ -7805,6 +8475,7 @@ end;
 
 function TWebStatusMMC.MMCVoltagesToNames(AVoltages:LongWord):TStringList;
 begin
+ {}
  Result:=TStringList.Create;
 
  {Check Voltages}
@@ -7888,6 +8559,7 @@ end;
 
 function TWebStatusMMC.MMCCapabilitiesToNames(ACapabilities:LongWord):TStringList;
 begin
+ {}
  Result:=TStringList.Create;
 
  {Check Capabilities}
@@ -8023,6 +8695,7 @@ end;
 
 function TWebStatusMMC.MMCCapabilities2ToNames(ACapabilities2:LongWord):TStringList;
 begin
+ {}
  Result:=TStringList.Create;
 
  {Check Capabilities2}
@@ -8118,6 +8791,7 @@ end;
 
 function TWebStatusMMC.SDHCIQuirksToNames(AQuirks:LongWord):TStringList;
 begin
+ {}
  Result:=TStringList.Create;
 
  {Check Quirks}
@@ -8253,6 +8927,7 @@ end;
 
 function TWebStatusMMC.SDHCIQuirks2ToNames(AQuirks2:LongWord):TStringList;
 begin
+ {}
  Result:=TStringList.Create;
 
  {Check AQuirks2}
@@ -8344,6 +9019,7 @@ end;
 
 function TWebStatusMMC.SDHCIInterruptsToNames(AInterrupts:LongWord):TStringList;
 begin
+ {}
  Result:=TStringList.Create;
 
  {Check Interrupts}
@@ -8473,7 +9149,7 @@ function TWebStatusMMC.DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;ARespon
 var
  Id:LongWord;
  Action:String;
- Count:LongWord;
+ Count:Integer;
  WorkBuffer:String;
  Data:TWebStatusData;
  Names:TStringList;
@@ -8481,7 +9157,7 @@ var
  
  MMCDevice:PMMCDevice;
  SDHCIHost:PSDHCIHost;
- SDIODevice:PSDIODevice;
+ SDIOFunction:PSDIOFunction;
 begin
  {}
  Result:=False;
@@ -8595,35 +9271,53 @@ begin
 
      AddBlank(AResponse);
      
-     AddItem(AResponse,'EraseSize:',IntToStr(MMCDevice.EraseSize));
-     AddItem(AResponse,'EraseShift:',IntToStr(MMCDevice.EraseShift));
-     AddItem(AResponse,'EraseArgument:',IntToHex(MMCDevice.EraseArgument,8));
-     AddItem(AResponse,'PreferredEraseSize:',IntToStr(MMCDevice.PreferredEraseSize));
-     AddItem(AResponse,'EnhancedStrobe:',BooleanToString(MMCDevice.EnhancedStrobe));
+     AddItem(AResponse,'Erase Size:',IntToStr(MMCDevice.EraseSize));
+     AddItem(AResponse,'Erase Shift:',IntToStr(MMCDevice.EraseShift));
+     AddItem(AResponse,'Erase Argument:','0x' + IntToHex(MMCDevice.EraseArgument,8));
+     AddItem(AResponse,'Preferred Erase Size:',IntToStr(MMCDevice.PreferredEraseSize));
+     AddItem(AResponse,'Enhanced Strobe:',BooleanToString(MMCDevice.EnhancedStrobe));
      AddBlank(AResponse);
+
+     WorkBuffer:='None';
+     if MMCDevice.Storage <> nil then WorkBuffer:=DeviceGetName(@MMCDevice.Storage.Device);
+     AddItem(AResponse,'Storage:',WorkBuffer);
 
      case MMCDevice.Device.DeviceType of
       MMC_TYPE_SDIO,MMC_TYPE_SD_COMBO:begin
-        SDIODevice:=PSDIODevice(MMCDevice);
-        AddItem(AResponse,'State:',SDIODeviceStateToString(SDIODevice.SDIOState));
-        AddItem(AResponse,'Status:',SDIODeviceStatusToString(SDIODevice.SDIOStatus));
-        //To Do //TestingSDIO
+        AddBlank(AResponse);
+        AddBold(AResponse,'SDIO Functions','');
+        AddBlank(AResponse);
+        AddItem(AResponse,'Count:',IntToStr(MMCDevice.SDIOCount));
         AddBlank(AResponse);
         
-        WorkBuffer:='';
-        if SDIODevice.Host <> nil then WorkBuffer:=DeviceGetName(@SDIODevice.Host);
-        AddItem(AResponse,'Host:',WorkBuffer);
+        for Count:=1 to SDIO_MAX_FUNCTIONS do
+         begin
+          SDIOFunction:=SDIOFunctionFind(MMCDevice,Count);
+          if SDIOFunction <> nil then
+           begin
+            AddItem(AResponse,'Number:',IntToStr(SDIOFunction.Number));
+            AddItem(AResponse,'State:',SDIOFunctionStateToString(SDIOFunction.SDIOState));
+            AddItem(AResponse,'Status:',SDIOFunctionStatusToString(SDIOFunction.SDIOStatus));
+            AddItem(AResponse,'Class Id:',IntToHex(SDIOFunction.ClassId,2));
+            AddItem(AResponse,'Vendor Id:',IntToHex(SDIOFunction.VendorId,4));
+            AddItem(AResponse,'Device Id:',IntToHex(SDIOFunction.DeviceId,4));
+            AddItem(AResponse,'Block Size:',IntToStr(SDIOFunction.BlockSize));
+            AddItem(AResponse,'Max Block Size:',IntToStr(SDIOFunction.MaxBlockSize));
+            AddItem(AResponse,'Enable Timeout:',IntToStr(SDIOFunction.EnableTimeout));
+            
+            WorkBuffer:='None';
+            if SDIOFunction.Driver <> nil then WorkBuffer:=DriverGetName(@SDIOFunction.Driver.Driver);
+            AddItem(AResponse,'Driver:',WorkBuffer);
+            
+            WorkBuffer:='';
+            if Assigned(SDIOFunction.Handler) then WorkBuffer:=PtrToHex(@SDIOFunction.Handler);
+            AddItem(AResponse,'Interrupt Handler:',WorkBuffer);
 
-        WorkBuffer:='';
-        if SDIODevice.Driver <> nil then WorkBuffer:=DriverGetName(@SDIODevice.Driver.Driver);
-        AddItem(AResponse,'Driver:',WorkBuffer);
-        AddBlank(AResponse);
+            AddBlank(AResponse);
+           end;
+         end;
        end;
      end;  
-     
-     WorkBuffer:='';
-     if MMCDevice.Storage <> nil then WorkBuffer:=DeviceGetName(@MMCDevice.Storage.Device);
-     AddItem(AResponse,'Storage:',WorkBuffer);
      
      FlagNames.Free;
     end
@@ -8851,7 +9545,7 @@ begin
      AddItem(AResponse,'Interrupt Count:',IntToStr(SDHCIHost.InterruptCount));
      AddItem(AResponse,'Data Interrupt Count:',IntToStr(SDHCIHost.DataInterruptCount));
      AddItem(AResponse,'Command Interrupt Count:',IntToStr(SDHCIHost.CommandInterruptCount));
-    
+
      FlagNames.Free;
     end
    else
@@ -8878,6 +9572,7 @@ begin
    Data.Host:=AHost;
    Data.Request:=ARequest;
    Data.Response:=AResponse;
+   Data.ContentStream:=nil;
    Data.Data:=nil;
    
    {Enumerate MMCs}
@@ -8895,6 +9590,7 @@ begin
    Data.Host:=AHost;
    Data.Request:=ARequest;
    Data.Response:=AResponse;
+   Data.ContentStream:=nil;
    Data.Data:=nil;
    
    {Enumerate SDHCIs}
@@ -8912,6 +9608,7 @@ begin
    Data.Host:=AHost;
    Data.Request:=ARequest;
    Data.Response:=AResponse;
+   Data.ContentStream:=nil;
    Data.Data:=nil;
      
    {Enumerate SDIO Drivers}
@@ -8921,6 +9618,519 @@ begin
    AddFooterEx(AResponse,4); 
   end; 
  
+ {Return Result}
+ Result:=True;
+end;
+
+{==============================================================================}
+{==============================================================================}
+{TWebStatusHID}
+constructor TWebStatusHID.Create(AMain:TWebStatusMain);
+begin
+ {}
+ FCaption:='HID'; {Must be before create for register}
+ inherited Create(AMain);
+ Name:='/hid';
+ 
+ if FMain <> nil then Name:=FMain.Name + Name;
+end; 
+
+{==============================================================================}
+
+function TWebStatusHID.HIDFlagsToFlagNames(AFlags:LongWord):TStringList;
+begin
+ {}
+ Result:=TStringList.Create;
+
+ {Check Flags}
+ {Nothing}
+
+ {Check Flags}
+ if Result.Count = 0 then
+  begin
+   Result.Add('HID_FLAG_NONE');
+  end; 
+end;
+
+{==============================================================================}
+
+function TWebStatusHID.DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;AResponse:THTTPServerResponse):Boolean;
+
+ function HIDReportFilename(Device:PHIDDevice):String;
+ begin
+  {}
+  Result:='HID_Report_Descriptor.dat';
+
+  {Check Device}
+  if Device = nil then Exit;
+
+  {Check Device Type}
+  if Device.Device.DeviceType = HID_TYPE_USB then
+   begin
+    Result:='HID_Report_'  + IntToHex(PUSBHIDDevice(Device).USBDevice.Descriptor.idVendor,4);
+    Result:=Result + '_' + IntToHex(PUSBHIDDevice(Device).USBDevice.Descriptor.idProduct,4);
+    Result:=Result + '_' + IntToStr(PUSBHIDDevice(Device).USBInterface.Descriptor.bInterfaceNumber) + '.dat';
+   end;
+ end;
+
+ procedure HIDLogOutput(const AText:String); 
+ begin
+  {}
+  AddItemSpan(AResponse,'<pre>' + AText + '</pre>',2,False);
+ end;
+
+ function HIDLogCollection(Collection:PHIDCollection;Level:LongWord):Boolean;
+ var
+  Indent:String;
+  Alias:PHIDUsage;
+  Usage:PHIDUsage;
+  Report:PHIDReport;
+  WorkBuffer:String;
+  AliasIndex:LongWord;
+  UsageIndex:LongWord;
+  ReportIndex:LongWord;
+  CollectionIndex:LongWord;
+ begin
+  {}
+  Result:=False;
+
+  {Check Collection}
+  if Collection = nil then Exit;
+
+  {Get Indent}
+  Indent:=StringOfChar(' ',Level * 2);
+
+  {Log Collection}
+  HIDLogOutput(Indent + '[Collection]');
+  HIDLogOutput(Indent + 'Page:             ' + '0x' + IntToHex(Collection.Page,4) + ' (' + HIDPageToString(Collection.Page) + ')');
+  HIDLogOutput(Indent + 'Usage:            ' + '0x' + IntToHex(Collection.Usage,4) + ' (' + HIDUsageToString(Collection.Page,Collection.Usage,1) + ')');
+  HIDLogOutput(Indent + 'Flags:            ' + '0x' + IntToHex(Collection.Flags,8) + ' (' + HIDCollectionFlagsToString(Collection.Flags) + ')');
+
+  HIDLogOutput(Indent + 'Start:            ' + IntToStr(Collection.Start));
+
+  HIDLogOutput(Indent + 'Report Count:     ' + IntToStr(Collection.ReportCount));
+  HIDLogOutput(Indent + 'Collection Count: ' + IntToStr(Collection.CollectionCount));
+
+  WorkBuffer:='';
+  if Collection.Device <> nil then WorkBuffer:=DeviceGetName(@Collection.Device.Device);
+  HIDLogOutput(Indent + 'Device:           ' + WorkBuffer);
+  WorkBuffer:='None';
+  if Collection.Consumer <> nil then WorkBuffer:=DriverGetName(@Collection.Consumer.Driver);
+  HIDLogOutput(Indent + 'Consumer:         ' + WorkBuffer);
+  HIDLogOutput(Indent);
+
+  {Check Collections}
+  if Collection.CollectionCount > 0 then
+   begin
+    for CollectionIndex:=0 to Collection.CollectionCount - 1 do
+     begin
+      if Collection.Collections[CollectionIndex] <> nil then
+       begin
+        {Log Collection}
+        if not HIDLogCollection(Collection.Collections[CollectionIndex],Level + 1) then Exit;
+       end;
+     end;
+   end; 
+
+  {Log Reports}
+  if Collection.ReportCount > 0 then
+   begin
+    for ReportIndex:=0 to Collection.ReportCount - 1 do
+     begin
+      Report:=Collection.Reports[ReportIndex];
+      if Report <> nil then
+       begin
+        {Get Indent}
+        Indent:=StringOfChar(' ',(Level * 2) + 2);
+
+        {Log Report}
+        HIDLogOutput(Indent + '[Report]');
+        HIDLogOutput(Indent + 'Id:          ' + IntToStr(Report.Id));
+        HIDLogOutput(Indent + 'Kind:        ' + IntToStr(Report.Kind) + ' (' + HIDReportKindToString(Report.Kind) + ')');
+        HIDLogOutput(Indent + 'Flags:       ' + '0x' + IntToHex(Report.Flags,8) + ' (' + HIDReportFlagsToString(Report.Flags) + ')');
+        HIDLogOutput(Indent + 'Size:        ' + IntToStr(Report.Size) + ' (Bits per Field)');
+        HIDLogOutput(Indent + 'Count:       ' + IntToStr(Report.Count) + ' (Number of Fields)');
+        HIDLogOutput(Indent + 'Index:       ' + IntToStr(Report.Index));
+        HIDLogOutput(Indent + 'Sequence:    ' + IntToStr(Report.Sequence));
+        HIDLogOutput(Indent + 'Usage Count: ' + IntToStr(Report.UsageCount));
+        HIDLogOutput(Indent);
+
+        {Check Usages}
+        if Report.UsageCount > 0 then
+         begin
+          for UsageIndex:=0 to Report.UsageCount - 1 do
+           begin
+            Usage:=Report.Usages[UsageIndex];
+            if Usage <> nil then
+             begin
+              {Get Indent}
+              Indent:=StringOfChar(' ',(Level * 2) + 4);
+
+              {Log Usage}
+              HIDLogOutput(Indent + '[Usage]');
+              HIDLogOutput(Indent + 'Page:             ' + '0x' + IntToHex(Usage.Page,4) + ' (' + HIDPageToString(Usage.Page) + ')');
+              HIDLogOutput(Indent + 'Usage:            ' + '0x' + IntToHex(Usage.Usage,4) + ' (' + HIDUsageToString(Usage.Page,Usage.Usage,Usage.Count) + ')');
+              HIDLogOutput(Indent + 'Count:            ' + IntToStr(Usage.Count));
+              HIDLogOutput(Indent + 'Index:            ' + IntToStr(Usage.Index));
+              HIDLogOutput(Indent + 'Logical Minimum:  ' + IntToStr(Usage.LogicalMinimum));
+              HIDLogOutput(Indent + 'Logical Maximum:  ' + IntToStr(Usage.LogicalMaximum));
+              HIDLogOutput(Indent + 'Physical Minimum: ' + IntToStr(Usage.PhysicalMinimum));
+              HIDLogOutput(Indent + 'Physical Maximum: ' + IntToStr(Usage.PhysicalMaximum));
+              HIDLogOutput(Indent + 'Unit Type:        ' + '0x' + IntToHex(Usage.UnitType,8) + ' (' + HIDUnitTypeToString(Usage.UnitType) + ')');
+              HIDLogOutput(Indent + 'Unit Exponent:    ' + '0x' + IntToHex(Usage.UnitExponent,2) + ' (Exponent: ' + IntToStr(HID_GLOBAL_UNIT_EXPONENTS[Usage.UnitExponent]) + ' / Multiplier: ' + FloatToStr(HID_GLOBAL_UNIT_MULTIPLIERS[Usage.UnitExponent]) + ')');
+              HIDLogOutput(Indent + 'Alias Count:      ' + IntToStr(Usage.AliasCount));
+              HIDLogOutput(Indent);
+
+              {Check Aliases}
+              if Usage.AliasCount > 0 then
+               begin
+                for AliasIndex:=0 to Usage.AliasCount - 1 do
+                 begin
+                  Alias:=Usage.Aliases[AliasIndex];
+                  if Alias <> nil then
+                   begin
+                    {Get Indent}
+                    Indent:=StringOfChar(' ',(Level * 2) + 6);
+
+                    {Log Alias}
+                    HIDLogOutput(Indent + '[Alias]');
+                    HIDLogOutput(Indent + 'Page:             ' + '0x' + IntToHex(Alias.Page,4) + ' (' + HIDPageToString(Alias.Page) + ')');
+                    HIDLogOutput(Indent + 'Usage:            ' + '0x' + IntToHex(Alias.Usage,4) + ' (' + HIDUsageToString(Alias.Page,Alias.Usage,Alias.Count) + ')');
+                    HIDLogOutput(Indent + 'Count:            ' + IntToStr(Alias.Count));
+                    HIDLogOutput(Indent + 'Index:            ' + IntToStr(Alias.Index));
+                    HIDLogOutput(Indent + 'Logical Minimum:  ' + IntToStr(Alias.LogicalMinimum));
+                    HIDLogOutput(Indent + 'Logical Maximum:  ' + IntToStr(Alias.LogicalMaximum));
+                    HIDLogOutput(Indent + 'Physical Minimum: ' + IntToStr(Alias.PhysicalMinimum));
+                    HIDLogOutput(Indent + 'Physical Maximum: ' + IntToStr(Alias.PhysicalMaximum));
+                    HIDLogOutput(Indent + 'Unit Type:        ' + '0x' + IntToHex(Alias.UnitType,8) + ' (' + HIDUnitTypeToString(Alias.UnitType) + ')');
+                    HIDLogOutput(Indent + 'Unit Exponent:    ' + '0x' + IntToHex(Alias.UnitExponent,2) + ' (Exponent: ' + IntToStr(HID_GLOBAL_UNIT_EXPONENTS[Alias.UnitExponent]) + ' / Multiplier: ' + FloatToStr(HID_GLOBAL_UNIT_MULTIPLIERS[Alias.UnitExponent]) + ')');
+                    HIDLogOutput(Indent);
+                   end;
+                 end;
+               end;
+             end;
+           end;
+         end;  
+       end;
+     end;
+   end;
+
+  Result:=True;
+ end;
+
+ function HIDLogDefinition(Definition:PHIDDefinition):Boolean;
+ var
+  Indent:String;
+  Field:PHIDField;
+ begin
+  {}
+  Result:=False;
+
+  {Check Definition}
+  if Definition = nil then Exit;
+
+  {Get Indent}
+  Indent:=StringOfChar(' ',2);
+
+  {Log Definition}
+  HIDLogOutput(Indent + '[Definition]');
+  HIDLogOutput(Indent + 'Id:          ' + IntToStr(Definition.Id));
+  HIDLogOutput(Indent + 'Kind:        ' + IntToStr(Definition.Kind) + ' (' + HIDReportKindToString(Definition.Kind) + ')');
+  HIDLogOutput(Indent + 'Size:        ' + IntToStr(Definition.Size) + ' (Bytes)');
+  HIDLogOutput(Indent);
+
+  {Get Indent}
+  Indent:=StringOfChar(' ',4);
+
+  {Log Fields}
+  if Definition.Fields <> nil then
+   begin
+    Field:=Definition.Fields;
+    while Field <> nil do
+     begin
+      {Log Field}
+      HIDLogOutput(Indent + '[Field]');
+      HIDLogOutput(Indent + 'Page:             ' + '0x' + IntToHex(Field.Page,4) + ' (' + HIDPageToString(Field.Page) + ')');
+      HIDLogOutput(Indent + 'Usage:            ' + '0x' + IntToHex(Field.Usage,4) + ' (' + HIDUsageToString(Field.Page,Field.Usage,Field.Count) + ')');
+      HIDLogOutput(Indent + 'Count:            ' + IntToStr(Field.Count));
+      HIDLogOutput(Indent + 'Flags:            ' + '0x' + IntToHex(Field.Flags,8) + ' (' + HIDReportFlagsToString(Field.Flags) + ')');
+      HIDLogOutput(Indent + 'Size:             ' + IntToStr(Field.Size) + ' (Bytes)');
+      HIDLogOutput(Indent + 'Bits:             ' + IntToStr(Field.Bits));
+      HIDLogOutput(Indent + 'Offset:           ' + IntToStr(Field.Offset) + ' (Bytes)');
+      HIDLogOutput(Indent + 'Shift:            ' + IntToStr(Field.Shift));
+      HIDLogOutput(Indent + 'Logical Minimum:  ' + IntToStr(Field.Logical.Minimum));
+      HIDLogOutput(Indent + 'Logical Maximum:  ' + IntToStr(Field.Logical.Maximum));
+      HIDLogOutput(Indent + 'Physical Minimum: ' + IntToStr(Field.Physical.Minimum));
+      HIDLogOutput(Indent + 'Physical Maximum: ' + IntToStr(Field.Physical.Maximum));
+      HIDLogOutput(Indent + 'Multiplier:       ' + FloatToStr(Field.Multiplier));
+      HIDLogOutput(Indent + 'Resolution:       ' + FloatToStr(Field.Resolution));
+      HIDLogOutput(Indent);
+
+      Field:=Field.Next;
+     end;
+   end;
+
+  Result:=True;
+ end;
+
+var
+ MinId:Byte;
+ MaxId:Byte;
+ Id:LongWord;
+ Action:String;
+ Count:Integer;
+ Index:Integer;
+ WorkBuffer:String;
+ Data:TWebStatusData;
+ FlagNames:TStringList;
+ HIDDevice:PHIDDevice;
+ HIDReport:TMemoryStream;
+ HIDCollection:PHIDCollection;
+ HIDDefinition:PHIDDefinition;
+begin
+ {}
+ Result:=False;
+
+ {Check Host}
+ if AHost = nil then Exit;
+
+ {Check Request}
+ if ARequest = nil then Exit;
+
+ {Check Response}
+ if AResponse = nil then Exit;
+
+ {Get Action}
+ Action:=Uppercase(ARequest.GetParam('ACTION'));
+
+ {Get Id}
+ WorkBuffer:=Uppercase(ARequest.GetParam('ID'));
+
+ if (Action = 'HIDDEVICE') and (Length(WorkBuffer) > 0) then
+  begin
+   {Add Header (2 column with Caption)}
+   AddHeaderEx(AResponse,GetTitle,'HID Device Information',Self,2);
+
+   {Get Id}
+   Id:=StrToIntDef(WorkBuffer,0);
+
+   {Get HID Device}
+   HIDDevice:=HIDDeviceFind(Id);
+   if HIDDevice <> nil then
+    begin
+     {Get Flags Names}
+     FlagNames:=HIDFlagsToFlagNames(HIDDevice.Device.DeviceFlags);
+
+     AddBold(AResponse,'Device','');
+     AddBlank(AResponse);
+     AddItem(AResponse,'Name:',DeviceGetName(@HIDDevice.Device));
+     AddItem(AResponse,'Type:',HIDDeviceTypeToString(HIDDevice.Device.DeviceType));
+     AddItem(AResponse,'Flags:',FlagNames.Strings[0]);
+
+     {Check Flag Count}
+     if FlagNames.Count > 1 then
+      begin
+       for Count:=1 to FlagNames.Count - 1 do
+        begin
+         {Add Flag Name}
+         AddItem(AResponse,'',FlagNames.Strings[Count]);
+        end;
+      end;
+
+     AddItem(AResponse,'Description:',HIDDevice.Device.DeviceDescription);
+     AddBlank(AResponse);
+     AddItem(AResponse,'Id:',IntToStr(HIDDevice.HIDId));
+     AddItem(AResponse,'State:',HIDDeviceStateToString(HIDDevice.HIDState));
+     AddBlank(AResponse);
+
+     WorkBuffer:='None (see Collections)';
+     if HIDDevice.Consumer <> nil then WorkBuffer:=DriverGetName(@HIDDevice.Consumer.Driver);
+     AddItem(AResponse,'Consumer:',WorkBuffer);
+     AddBlank(AResponse);
+
+     AddItem(AResponse,'Collection Count:',IntToStr(HIDDevice.CollectionCount));
+     AddItem(AResponse,'Descriptor Size:',IntToStr(HIDDevice.DescriptorSize));
+     AddBlank(AResponse);
+
+     AddItem(AResponse,'Receive Count:',IntToStr(HIDDevice.ReceiveCount));
+     AddItem(AResponse,'Receive Errors:',IntToStr(HIDDevice.ReceiveErrors));
+     AddBlank(AResponse);
+
+     AddItem(AResponse,'Report Descriptor:','<button type="submit" onclick="window.open(''' + Name + '?action=hidreport&id=' + IntToStr(HIDDevice.HIDId) + ''')" style="width: 30%; height: 100%">Save to File</button>');
+     AddBlank(AResponse);
+
+     AddBold(AResponse,'HID Collections','');
+     AddBlank(AResponse);
+
+     {Check Collections}
+     if HIDDevice.CollectionCount > 0 then
+      begin
+       for Count:=0 to HIDDevice.CollectionCount - 1 do
+        begin
+         if HIDDevice.Collections[Count] <> nil then
+          begin
+           {Log Collection}
+           if not HIDLogCollection(HIDDevice.Collections[Count],0) then Break;
+          end;
+        end;
+      end;
+
+     AddBold(AResponse,'HID Definitions','');
+     AddBlank(AResponse);
+
+     {Check Collections}
+     if HIDDevice.CollectionCount > 0 then
+      begin
+       for Count:=0 to HIDDevice.CollectionCount - 1 do
+        begin
+         HIDCollection:=HIDDevice.Collections[Count];
+         if (HIDCollection <> nil) and (HIDCollection.Parent = nil) then
+          begin
+           {Get Report Ids}
+           if HIDFindReportIds(HIDDevice,HIDCollection,MinId,MaxId) = ERROR_SUCCESS then
+            begin
+             {Allocate Definitions}
+             for Index:=MinId to MaxId do
+              begin
+               {Allocate Input Definition}
+               HIDDefinition:=HIDAllocateDefinition(HIDDevice,HIDCollection,HID_REPORT_INPUT,Index);
+               if HIDDefinition <> nil then
+                begin
+                 {Log Definition}
+                 HIDLogDefinition(HIDDefinition);
+
+                 {Free Definition}
+                 HIDFreeDefinition(HIDDefinition);
+                end;
+
+               {Allocate Output Definition}
+               HIDDefinition:=HIDAllocateDefinition(HIDDevice,HIDCollection,HID_REPORT_OUTPUT,Index);
+               if HIDDefinition <> nil then
+                begin
+                 {Log Definition}
+                 HIDLogDefinition(HIDDefinition);
+
+                 {Free Definition}
+                 HIDFreeDefinition(HIDDefinition);
+                end;
+
+               {Allocate Feature Definition}
+               HIDDefinition:=HIDAllocateDefinition(HIDDevice,HIDCollection,HID_REPORT_FEATURE,Index);
+               if HIDDefinition <> nil then
+                begin
+                 {Log Definition}
+                 HIDLogDefinition(HIDDefinition);
+
+                 {Free Definition}
+                 HIDFreeDefinition(HIDDefinition);
+                end;
+              end;
+            end;
+          end;
+        end;
+      end;
+
+     FlagNames.Free;
+    end
+   else
+    begin
+     AddItem(AResponse,'Not Found','');
+    end;    
+
+   {Add Footer}
+   AddFooter(AResponse); 
+  end
+ else if (Action = 'HIDREPORT') and (Length(WorkBuffer) > 0) then
+  begin
+   {Get Id}
+   Id:=StrToIntDef(WorkBuffer,0);
+
+   {Get HID Device}
+   HIDDevice:=HIDDeviceFind(Id);
+   if (HIDDevice <> nil) and (HIDDevice.Descriptor <> nil) then
+    begin
+     {Create Stream}
+     HIDReport:=TMemoryStream.Create;
+
+     {Copy Descriptor}
+     HIDReport.Size:=HIDDevice.DescriptorSize;
+     HIDReport.Write(HIDDevice.Descriptor^,HIDDevice.DescriptorSize);
+     HIDReport.Position:=0;
+
+     {Success}
+     AResponse.Version:=HTTP_VERSION;
+     AResponse.Status:=HTTP_STATUS_OK;
+     AResponse.Reason:=HTTP_REASON_200;
+
+     {Set File Name}
+     AResponse.SetHeader(HTTP_ENTITY_HEADER_CONTENT_DISPOSITION,'attachment;filename=' + HIDReportFilename(HIDDevice));
+
+     {Set Content Type}
+     AResponse.SetHeader(HTTP_ENTITY_HEADER_CONTENT_TYPE,HTTP_MIME_TYPE_DEFAULT);
+
+     {Set No Cache}
+     AResponse.NoCache:=True;
+
+     {Set Content}
+     AResponse.ContentStream:=HIDReport;
+     
+     {Server will free the stream after send}
+    end
+   else
+    begin
+     {Add Header (2 column with Caption)}
+     AddHeaderEx(AResponse,GetTitle,'HID Report Descriptor',Self,2);
+
+     AddItem(AResponse,'Not Found','');
+
+     {Add Footer}
+     AddFooter(AResponse);
+    end;
+  end
+ else
+  begin 
+   {Add Header (4 column)}
+   AddHeaderEx(AResponse,GetTitle,'',Self,4); 
+
+   {Add HID Devices List} 
+   AddBold4Column(AResponse,'Devices','','','');
+   AddBlankEx(AResponse,4);
+   AddBold4Column(AResponse,'HID Id','Name','State','Type');
+   AddBlankEx(AResponse,4);
+
+   {Setup Data}
+   Data.Document:=Self;
+   Data.Host:=AHost;
+   Data.Request:=ARequest;
+   Data.Response:=AResponse;
+   Data.ContentStream:=nil;
+   Data.Data:=nil;
+
+   {Enumerate HID Devices}
+   HIDDeviceEnumerate(WebStatusHIDDeviceEnumerate,@Data);
+
+   {Add HID Consumer List} 
+   AddBlankEx(AResponse,4);
+   AddBold4Column(AResponse,'Consumers','','','');
+   AddBlankEx(AResponse,4);
+   AddBold4Column(AResponse,'Consumer Id','Name','State','');
+   AddBlankEx(AResponse,4);
+   
+   {Setup Data}
+   Data.Document:=Self;
+   Data.Host:=AHost;
+   Data.Request:=ARequest;
+   Data.Response:=AResponse;
+   Data.ContentStream:=nil;
+   Data.Data:=nil;
+   
+   {Enumerate HID Consumers}
+   HIDConsumerEnumerate(WebStatusHIDConsumerEnumerate,@Data);
+
+   {Add Footer (4 column)}
+   AddFooterEx(AResponse,4); 
+  end; 
+
  {Return Result}
  Result:=True;
 end;
@@ -8977,7 +10187,7 @@ var
  Id:LongWord;
  Name:String;
  Action:String;
- Count:LongWord;
+ Count:Integer;
  WorkBuffer:String;
  Data:TWebStatusData;
  FlagNames:TStringList;
@@ -9178,7 +10388,7 @@ begin
      else if Transport.Name = 'IP' then
       begin
        {GetNumberOfInterfaces}
-       GetNumberOfInterfaces(Count);
+       GetNumberOfInterfaces(LongWord(Count));
        AddBlank(AResponse);
        AddItem(AResponse,'Number of Interfaces:',IntToStr(Count));
        
@@ -9210,7 +10420,7 @@ begin
         end;
        
        {GetNumberOfInterfaces}
-       GetNumberOfInterfaces(Count);
+       GetNumberOfInterfaces(LongWord(Count));
        
        {GetIpAddrTable}
        if Count > 0 then
@@ -9428,6 +10638,7 @@ begin
    Data.Host:=AHost;
    Data.Request:=ARequest;
    Data.Response:=AResponse;
+   Data.ContentStream:=nil;
    Data.Data:=nil;
    
    {Enumerate Networks}
@@ -9504,9 +10715,75 @@ end;
 
 {==============================================================================}
 
+function TWebStatusStorage.StorageFlagsToFlagNames(AFlags:LongWord):TStringList; 
+begin
+ {}
+ Result:=TStringList.Create;
+
+ {Check Flags}
+ if (AFlags and STORAGE_FLAG_REMOVABLE) = STORAGE_FLAG_REMOVABLE then
+  begin
+   Result.Add('STORAGE_FLAG_REMOVABLE');
+  end;
+ if (AFlags and STORAGE_FLAG_LBA48) = STORAGE_FLAG_LBA48 then
+  begin
+   Result.Add('STORAGE_FLAG_LBA48');
+  end;
+ if (AFlags and STORAGE_FLAG_NOT_READY) = STORAGE_FLAG_NOT_READY then
+  begin
+   Result.Add('STORAGE_FLAG_NOT_READY');
+  end;
+ if (AFlags and STORAGE_FLAG_NO_MEDIA) = STORAGE_FLAG_NO_MEDIA then
+  begin
+   Result.Add('STORAGE_FLAG_NO_MEDIA');
+  end;
+ if (AFlags and STORAGE_FLAG_READ_ONLY) = STORAGE_FLAG_READ_ONLY then
+  begin
+   Result.Add('STORAGE_FLAG_READ_ONLY');
+  end;
+ if (AFlags and STORAGE_FLAG_WRITE_ONLY) = STORAGE_FLAG_WRITE_ONLY then
+  begin
+   Result.Add('STORAGE_FLAG_WRITE_ONLY');
+  end;
+ if (AFlags and STORAGE_FLAG_ERASEABLE) = STORAGE_FLAG_ERASEABLE then
+  begin
+   Result.Add('STORAGE_FLAG_ERASEABLE');
+  end;
+ if (AFlags and STORAGE_FLAG_LOCKABLE) = STORAGE_FLAG_LOCKABLE then
+  begin
+   Result.Add('STORAGE_FLAG_LOCKABLE');
+  end;
+ if (AFlags and STORAGE_FLAG_LOCKED) = STORAGE_FLAG_LOCKED then
+  begin
+   Result.Add('STORAGE_FLAG_LOCKED');
+  end;
+ if (AFlags and STORAGE_FLAG_EJECTABLE) = STORAGE_FLAG_EJECTABLE then
+  begin
+   Result.Add('STORAGE_FLAG_EJECTABLE');
+  end;
+ if (AFlags and STORAGE_FLAG_CHANGABLE) = STORAGE_FLAG_CHANGABLE then
+  begin
+   Result.Add('STORAGE_FLAG_CHANGABLE');
+  end;
+
+ {Check Flags}
+ if Result.Count = 0 then
+  begin
+   Result.Add('STORAGE_FLAG_NONE');
+  end; 
+end;
+
+{==============================================================================}
+
 function TWebStatusStorage.DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;AResponse:THTTPServerResponse):Boolean;
 var
+ Id:LongWord;
+ Action:String;
+ Count:Integer;
+ WorkBuffer:String;
  Data:TWebStatusData;
+ FlagNames:TStringList;
+ StorageDevice:PStorageDevice;
 begin
  {}
  Result:=False;
@@ -9520,26 +10797,101 @@ begin
  {Check Response}
  if AResponse = nil then Exit;
 
- {Add Header (4 column)}
- AddHeaderEx(AResponse,GetTitle,'',Self,4); 
+ {Get Action}
+ Action:=Uppercase(ARequest.GetParam('ACTION'));
 
- {Add Storage List} 
- AddBold4Column(AResponse,'Storage Id','Name','State','Type');
- AddBlankEx(AResponse,4);
- 
- {Setup Data}
- Data.Document:=Self;
- Data.Host:=AHost;
- Data.Request:=ARequest;
- Data.Response:=AResponse;
- Data.Data:=nil;
- 
- {Enumerate Storage}
- StorageDeviceEnumerate(WebStatusStorageEnumerate,@Data);
- 
- {Add Footer (4 column)}
- AddFooterEx(AResponse,4); 
- 
+ {Get Id}
+ WorkBuffer:=Uppercase(ARequest.GetParam('ID'));
+
+ if (Action = 'STORAGE') and (Length(WorkBuffer) > 0) then
+  begin
+   {Add Header (2 column with Caption)}
+   AddHeaderEx(AResponse,GetTitle,'Storage Information',Self,2);
+
+   {Get Id}
+   Id:=StrToIntDef(WorkBuffer,0);
+
+   {Get Storage Device}
+   StorageDevice:=StorageDeviceFind(Id);
+   if StorageDevice <> nil then
+    begin
+     {Get Flags Names}
+     FlagNames:=StorageFlagsToFlagNames(StorageDevice.Device.DeviceFlags);
+
+     AddBold(AResponse,'Storage','');
+     AddBlank(AResponse);
+     AddItem(AResponse,'Name:',DeviceGetName(@StorageDevice.Device));
+     AddItem(AResponse,'Type:',StorageDeviceTypeToString(StorageDevice.Device.DeviceType));
+     AddItem(AResponse,'Flags:',FlagNames.Strings[0]);
+
+     {Check Flag Count}
+     if FlagNames.Count > 1 then
+      begin
+       for Count:=1 to FlagNames.Count - 1 do
+        begin
+         {Add Flag Name}
+         AddItem(AResponse,'',FlagNames.Strings[Count]);
+        end;
+      end;
+
+     AddItem(AResponse,'Description:',StorageDevice.Device.DeviceDescription);
+     AddBlank(AResponse);
+     AddItem(AResponse,'Id:',IntToStr(StorageDevice.StorageId));
+     AddItem(AResponse,'State:',StorageDeviceStateToString(StorageDevice.StorageState));
+     AddBlank(AResponse);
+
+     AddItem(AResponse,'Target ID:',IntToStr(StorageDevice.TargetID));
+     AddItem(AResponse,'Target LUN:',IntToStr(StorageDevice.TargetLUN));
+     AddItem(AResponse,'Block Size:',IntToStr(StorageDevice.BlockSize) + ' Bytes');
+     AddItem(AResponse,'Block Count:',IntToStr(StorageDevice.BlockCount));
+     AddItem(AResponse,'Block Shift:',IntToStr(StorageDevice.BlockShift));
+     AddItem(AResponse,'Vendor:',String(StorageDevice.Vendor));
+     AddItem(AResponse,'Product:',String(StorageDevice.Product));
+     AddItem(AResponse,'Revision:',String(StorageDevice.Revision));
+     AddBlank(AResponse);
+
+     AddItem(AResponse,'Read Count:',IntToStr(StorageDevice.ReadCount));
+     AddItem(AResponse,'Read Errors:',IntToStr(StorageDevice.ReadErrors));
+     AddItem(AResponse,'Write Count:',IntToStr(StorageDevice.WriteCount));
+     AddItem(AResponse,'Write Errors:',IntToStr(StorageDevice.WriteErrors));
+     AddItem(AResponse,'Erase Count:',IntToStr(StorageDevice.EraseCount));
+     AddItem(AResponse,'Erase Errors:',IntToStr(StorageDevice.EraseErrors));
+     AddBlank(AResponse);
+
+     FlagNames.Free;
+    end
+   else
+    begin
+     AddItem(AResponse,'Not Found','');
+    end;    
+
+   {Add Footer}
+   AddFooter(AResponse); 
+  end
+ else
+  begin
+   {Add Header (4 column)}
+   AddHeaderEx(AResponse,GetTitle,'',Self,4); 
+
+   {Add Storage List} 
+   AddBold4Column(AResponse,'Storage Id','Name','State','Type');
+   AddBlankEx(AResponse,4);
+
+   {Setup Data}
+   Data.Document:=Self;
+   Data.Host:=AHost;
+   Data.Request:=ARequest;
+   Data.Response:=AResponse;
+   Data.ContentStream:=nil;
+   Data.Data:=nil;
+
+   {Enumerate Storage}
+   StorageDeviceEnumerate(WebStatusStorageEnumerate,@Data);
+
+   {Add Footer (4 column)}
+   AddFooterEx(AResponse,4); 
+  end;
+
  {Return Result}
  Result:=True;
 end;
@@ -9853,13 +11205,13 @@ begin
      AddItemEx(AResponse,'Pages Marked Unknown:', IntToStr(Statistics.UnknownCount),2);
      AddBlank(AResponse);
      WorkTime:=CachePageTimeToDateTime(Statistics.OldestClean);
-     AddItemEx(AResponse,'Oldest Clean Page:',IntToStr(Trunc(WorkTime)) + ' days ' + TimeToStr(WorkTime),2);
+     AddItemEx(AResponse,'Oldest Clean Page:',NormalizedIntervalToStr(WorkTime),2);
      WorkTime:=CachePageTimeToDateTime(Statistics.NewestClean);
-     AddItemEx(AResponse,'Newest Clean Page:',IntToStr(Trunc(WorkTime)) + ' days ' + TimeToStr(WorkTime),2);
+     AddItemEx(AResponse,'Newest Clean Page:',NormalizedIntervalToStr(WorkTime),2);
      WorkTime:=CachePageTimeToDateTime(Statistics.OldestDirty);
-     AddItemEx(AResponse,'Oldest Dirty Page:',IntToStr(Trunc(WorkTime)) + ' days ' + TimeToStr(WorkTime),2);
+     AddItemEx(AResponse,'Oldest Dirty Page:',NormalizedIntervalToStr(WorkTime),2);
      WorkTime:=CachePageTimeToDateTime(Statistics.NewestDirty);
-     AddItemEx(AResponse,'Newest Dirty Page:',IntToStr(Trunc(WorkTime)) + ' days ' + TimeToStr(WorkTime),2);
+     AddItemEx(AResponse,'Newest Dirty Page:',NormalizedIntervalToStr(WorkTime),2);
     end;
   end; 
  
@@ -9885,9 +11237,80 @@ end;
 
 {==============================================================================}
 
+function TWebStatusKeyboard.KeyboardFlagsToFlagNames(AFlags:LongWord):TStringList; 
+begin
+ {}
+ Result:=TStringList.Create;
+
+ {Check Flags}
+ if (AFlags and KEYBOARD_FLAG_NON_BLOCK) = KEYBOARD_FLAG_NON_BLOCK then
+  begin
+   Result.Add('KEYBOARD_FLAG_NON_BLOCK');
+  end;
+ if (AFlags and KEYBOARD_FLAG_DIRECT_READ) = KEYBOARD_FLAG_DIRECT_READ then
+  begin
+   Result.Add('KEYBOARD_FLAG_DIRECT_READ');
+  end;
+ if (AFlags and KEYBOARD_FLAG_PEEK_BUFFER) = KEYBOARD_FLAG_PEEK_BUFFER then
+  begin
+   Result.Add('KEYBOARD_FLAG_PEEK_BUFFER');
+  end;
+
+ {Check Flags}
+ if Result.Count = 0 then
+  begin
+   Result.Add('KEYBOARD_FLAG_NONE');
+  end; 
+end;
+
+{==============================================================================}
+
+function TWebStatusKeyboard.KeyboardLEDsToNames(ALEDs:LongWord):TStringList;
+begin
+ {}
+ Result:=TStringList.Create;
+
+ {Check LEDs}
+ if (ALEDs and KEYBOARD_LED_NUMLOCK) = KEYBOARD_LED_NUMLOCK then
+  begin
+   Result.Add('KEYBOARD_LED_NUMLOCK');
+  end;
+ if (ALEDs and KEYBOARD_LED_CAPSLOCK) = KEYBOARD_LED_CAPSLOCK then
+  begin
+   Result.Add('KEYBOARD_LED_CAPSLOCK');
+  end;
+ if (ALEDs and KEYBOARD_LED_SCROLLLOCK) = KEYBOARD_LED_SCROLLLOCK then
+  begin
+   Result.Add('KEYBOARD_LED_SCROLLLOCK');
+  end;
+ if (ALEDs and KEYBOARD_LED_COMPOSE) = KEYBOARD_LED_COMPOSE then
+  begin
+   Result.Add('KEYBOARD_LED_COMPOSE');
+  end;
+ if (ALEDs and KEYBOARD_LED_KANA) = KEYBOARD_LED_KANA then
+  begin
+   Result.Add('KEYBOARD_LED_KANA');
+  end;
+
+ {Check LEDs}
+ if Result.Count = 0 then
+  begin
+   Result.Add('KEYBOARD_LED_NONE');
+  end; 
+end;
+
+{==============================================================================}
+
 function TWebStatusKeyboard.DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;AResponse:THTTPServerResponse):Boolean;
 var
+ Id:LongWord;
+ Action:String;
+ Count:Integer;
+ WorkBuffer:String;
  Data:TWebStatusData;
+ Names:TStringList;
+ FlagNames:TStringList;
+ KeyboardDevice:PKeyboardDevice;
 begin
  {}
  Result:=False;
@@ -9901,26 +11324,106 @@ begin
  {Check Response}
  if AResponse = nil then Exit;
 
- {Add Header (4 column)}
- AddHeaderEx(AResponse,GetTitle,'',Self,4); 
+ {Get Action}
+ Action:=Uppercase(ARequest.GetParam('ACTION'));
 
- {Add Keyboard List} 
- AddBold4Column(AResponse,'Keyboard Id','Name','State','Type');
- AddBlankEx(AResponse,4);
- 
- {Setup Data}
- Data.Document:=Self;
- Data.Host:=AHost;
- Data.Request:=ARequest;
- Data.Response:=AResponse;
- Data.Data:=nil;
- 
- {Enumerate Keyboards}
- KeyboardDeviceEnumerate(WebStatusKeyboardEnumerate,@Data);
- 
- {Add Footer (4 column)}
- AddFooterEx(AResponse,4); 
- 
+ {Get Id}
+ WorkBuffer:=Uppercase(ARequest.GetParam('ID'));
+
+ if (Action = 'KEYBOARD') and (Length(WorkBuffer) > 0) then
+  begin
+   {Add Header (2 column with Caption)}
+   AddHeaderEx(AResponse,GetTitle,'Keyboard Information',Self,2);
+
+   {Get Id}
+   Id:=StrToIntDef(WorkBuffer,0);
+
+   {Get Keyboard Device}
+   KeyboardDevice:=KeyboardDeviceFind(Id);
+   if KeyboardDevice <> nil then
+    begin
+     {Get Flags Names}
+     FlagNames:=KeyboardFlagsToFlagNames(KeyboardDevice.Device.DeviceFlags);
+
+     AddBold(AResponse,'Keyboard','');
+     AddBlank(AResponse);
+     AddItem(AResponse,'Name:',DeviceGetName(@KeyboardDevice.Device));
+     AddItem(AResponse,'Type:',KeyboardDeviceTypeToString(KeyboardDevice.Device.DeviceType));
+     AddItem(AResponse,'Flags:',FlagNames.Strings[0]);
+
+     {Check Flag Count}
+     if FlagNames.Count > 1 then
+      begin
+       for Count:=1 to FlagNames.Count - 1 do
+        begin
+         {Add Flag Name}
+         AddItem(AResponse,'',FlagNames.Strings[Count]);
+        end;
+      end;
+
+     AddItem(AResponse,'Description:',KeyboardDevice.Device.DeviceDescription);
+     AddBlank(AResponse);
+     AddItem(AResponse,'Id:',IntToStr(KeyboardDevice.KeyboardId));
+     AddItem(AResponse,'State:',KeyboardDeviceStateToString(KeyboardDevice.KeyboardState));
+     AddBlank(AResponse);
+
+     {Get LED Names}
+     Names:=KeyboardLEDsToNames(KeyboardDevice.KeyboardLEDs);
+     AddItem(AResponse,'LEDs:',Names.Strings[0]);
+     {Check LED Count}
+     if Names.Count > 1 then
+      begin
+       for Count:=1 to Names.Count - 1 do
+        begin
+         {Add LED Name}
+         AddItem(AResponse,'',Names.Strings[Count]);
+        end;
+      end;
+     Names.Free;
+
+     AddItem(AResponse,'Repeat Rate:',IntToStr(KeyboardDevice.KeyboardRate) + ' Milliseconds');
+     AddItem(AResponse,'Repeat Delay:',IntToStr(KeyboardDevice.KeyboardDelay * KeyboardDevice.KeyboardRate) + ' Milliseconds');
+     AddBlank(AResponse);
+
+     AddItem(AResponse,'Receive Count:',IntToStr(KeyboardDevice.ReceiveCount));
+     AddItem(AResponse,'Receive Errors:',IntToStr(KeyboardDevice.ReceiveErrors));
+     AddItem(AResponse,'Buffer Overruns:',IntToStr(KeyboardDevice.BufferOverruns));
+     AddBlank(AResponse);
+
+     FlagNames.Free;
+    end
+   else
+    begin
+     AddItem(AResponse,'Not Found','');
+    end;    
+
+   {Add Footer}
+   AddFooter(AResponse); 
+  end
+ else
+  begin
+   {Add Header (4 column)}
+   AddHeaderEx(AResponse,GetTitle,'',Self,4); 
+
+   {Add Keyboard List} 
+   AddBold4Column(AResponse,'Keyboard Id','Name','State','Type');
+   AddBlankEx(AResponse,4);
+
+   {Setup Data}
+   Data.Document:=Self;
+   Data.Host:=AHost;
+   Data.Request:=ARequest;
+   Data.Response:=AResponse;
+   Data.ContentStream:=nil;
+   Data.Data:=nil;
+
+   {Enumerate Keyboards}
+   KeyboardDeviceEnumerate(WebStatusKeyboardEnumerate,@Data);
+
+   {Add Footer (4 column)}
+   AddFooterEx(AResponse,4); 
+  end;
+
  {Return Result}
  Result:=True;
 end;
@@ -9940,9 +11443,116 @@ end;
 
 {==============================================================================}
 
+function TWebStatusMouse.MouseFlagsToFlagNames(AFlags:LongWord):TStringList;
+begin
+ {}
+ Result:=TStringList.Create;
+
+ {Check Flags}
+ if (AFlags and MOUSE_FLAG_NON_BLOCK) = MOUSE_FLAG_NON_BLOCK then
+  begin
+   Result.Add('MOUSE_FLAG_NON_BLOCK');
+  end;
+ if (AFlags and MOUSE_FLAG_DIRECT_READ) = MOUSE_FLAG_DIRECT_READ then
+  begin
+   Result.Add('MOUSE_FLAG_DIRECT_READ');
+  end;
+ if (AFlags and MOUSE_FLAG_SWAP_BUTTONS) = MOUSE_FLAG_SWAP_BUTTONS then
+  begin
+   Result.Add('MOUSE_FLAG_SWAP_BUTTONS');
+  end;
+ if (AFlags and MOUSE_FLAG_PEEK_BUFFER) = MOUSE_FLAG_PEEK_BUFFER then
+  begin
+   Result.Add('MOUSE_FLAG_PEEK_BUFFER');
+  end;
+ if (AFlags and MOUSE_FLAG_SWAP_XY) = MOUSE_FLAG_SWAP_XY then
+  begin
+   Result.Add('MOUSE_FLAG_SWAP_XY');
+  end;
+ if (AFlags and MOUSE_FLAG_INVERT_X) = MOUSE_FLAG_INVERT_X then
+  begin
+   Result.Add('MOUSE_FLAG_INVERT_X');
+  end;
+ if (AFlags and MOUSE_FLAG_INVERT_Y) = MOUSE_FLAG_INVERT_Y then
+  begin
+   Result.Add('MOUSE_FLAG_INVERT_Y');
+  end;
+ if (AFlags and MOUSE_FLAG_SWAP_MAX_XY) = MOUSE_FLAG_SWAP_MAX_XY then
+  begin
+   Result.Add('MOUSE_FLAG_SWAP_MAX_XY');
+  end;
+
+ {Check Flags}
+ if Result.Count = 0 then
+  begin
+   Result.Add('MOUSE_FLAG_NONE');
+  end; 
+end;
+
+{==============================================================================}
+
+function TWebStatusMouse.MouseButtonsToNames(AButtons:LongWord):TStringList;
+begin
+ {}
+ Result:=TStringList.Create;
+
+ {Check Buttons}
+ if (AButtons and MOUSE_LEFT_BUTTON) = MOUSE_LEFT_BUTTON then
+  begin
+   Result.Add('MOUSE_LEFT_BUTTON');
+  end;
+ if (AButtons and MOUSE_RIGHT_BUTTON) = MOUSE_RIGHT_BUTTON then
+  begin
+   Result.Add('MOUSE_RIGHT_BUTTON');
+  end;
+ if (AButtons and MOUSE_MIDDLE_BUTTON) = MOUSE_MIDDLE_BUTTON then
+  begin
+   Result.Add('MOUSE_MIDDLE_BUTTON');
+  end;
+ if (AButtons and MOUSE_SIDE_BUTTON) = MOUSE_SIDE_BUTTON then
+  begin
+   Result.Add('MOUSE_SIDE_BUTTON');
+  end;
+ if (AButtons and MOUSE_EXTRA_BUTTON) = MOUSE_EXTRA_BUTTON then
+  begin
+   Result.Add('MOUSE_EXTRA_BUTTON');
+  end;
+ if (AButtons and MOUSE_TOUCH_BUTTON) = MOUSE_TOUCH_BUTTON then
+  begin
+   Result.Add('MOUSE_TOUCH_BUTTON');
+  end;
+ if (AButtons and MOUSE_ABSOLUTE_X) = MOUSE_ABSOLUTE_X then
+  begin
+   Result.Add('MOUSE_ABSOLUTE_X');
+  end;
+ if (AButtons and MOUSE_ABSOLUTE_Y) = MOUSE_ABSOLUTE_Y then
+  begin
+   Result.Add('MOUSE_ABSOLUTE_Y');
+  end;
+ if (AButtons and MOUSE_ABSOLUTE_WHEEL) = MOUSE_ABSOLUTE_WHEEL then
+  begin
+   Result.Add('MOUSE_ABSOLUTE_WHEEL');
+  end;
+
+ {Check Buttons}
+ if Result.Count = 0 then
+  begin
+   Result.Add('MOUSE_BUTTON_NONE');
+  end; 
+end;
+
+{==============================================================================}
+
 function TWebStatusMouse.DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;AResponse:THTTPServerResponse):Boolean;
 var
+ Id:LongWord;
+ Action:String;
+ Count:Integer;
+ WorkBuffer:String;
  Data:TWebStatusData;
+ Names:TStringList;
+ FlagNames:TStringList;
+ MouseDevice:PMouseDevice;
 begin
  {}
  Result:=False;
@@ -9956,26 +11566,110 @@ begin
  {Check Response}
  if AResponse = nil then Exit;
 
- {Add Header (4 column)}
- AddHeaderEx(AResponse,GetTitle,'',Self,4); 
+ {Get Action}
+ Action:=Uppercase(ARequest.GetParam('ACTION'));
 
- {Add Mouse List} 
- AddBold4Column(AResponse,'Mouse Id','Name','State','Type');
- AddBlankEx(AResponse,4);
- 
- {Setup Data}
- Data.Document:=Self;
- Data.Host:=AHost;
- Data.Request:=ARequest;
- Data.Response:=AResponse;
- Data.Data:=nil;
- 
- {Enumerate Mice}
- MouseDeviceEnumerate(WebStatusMouseEnumerate,@Data);
- 
- {Add Footer (4 column)}
- AddFooterEx(AResponse,4); 
- 
+ {Get Id}
+ WorkBuffer:=Uppercase(ARequest.GetParam('ID'));
+
+ if (Action = 'MOUSE') and (Length(WorkBuffer) > 0) then
+  begin
+   {Add Header (2 column with Caption)}
+   AddHeaderEx(AResponse,GetTitle,'Mouse Information',Self,2);
+
+   {Get Id}
+   Id:=StrToIntDef(WorkBuffer,0);
+
+   {Get Mouse Device}
+   MouseDevice:=MouseDeviceFind(Id);
+   if MouseDevice <> nil then
+    begin
+     {Get Flags Names}
+     FlagNames:=MouseFlagsToFlagNames(MouseDevice.Device.DeviceFlags);
+
+     AddBold(AResponse,'Mouse','');
+     AddBlank(AResponse);
+     AddItem(AResponse,'Name:',DeviceGetName(@MouseDevice.Device));
+     AddItem(AResponse,'Type:',MouseDeviceTypeToString(MouseDevice.Device.DeviceType));
+     AddItem(AResponse,'Flags:',FlagNames.Strings[0]);
+
+     {Check Flag Count}
+     if FlagNames.Count > 1 then
+      begin
+       for Count:=1 to FlagNames.Count - 1 do
+        begin
+         {Add Flag Name}
+         AddItem(AResponse,'',FlagNames.Strings[Count]);
+        end;
+      end;
+
+     AddItem(AResponse,'Description:',MouseDevice.Device.DeviceDescription);
+     AddBlank(AResponse);
+     AddItem(AResponse,'Id:',IntToStr(MouseDevice.MouseId));
+     AddItem(AResponse,'State:',MouseDeviceStateToString(MouseDevice.MouseState));
+     AddBlank(AResponse);
+
+     AddItem(AResponse,'Rate:',IntToStr(MouseDevice.MouseRate) + ' Samples per second');
+     AddItem(AResponse,'Rotation:',MouseDeviceRotationToString(MouseDevice.Properties.Rotation));
+     AddItem(AResponse,'Max X:',IntToStr(MouseDevice.Properties.MaxX));
+     AddItem(AResponse,'Max Y:',IntToStr(MouseDevice.Properties.MaxY));
+     AddItem(AResponse,'Max Wheel:',IntToStr(MouseDevice.Properties.MaxWheel));
+     
+     {Get Button Names}
+     Names:=MouseButtonsToNames(MouseDevice.Properties.MaxButtons);
+     AddItem(AResponse,'Max Buttons:',Names.Strings[0]);
+     {Check Button Count}
+     if Names.Count > 1 then
+      begin
+       for Count:=1 to Names.Count - 1 do
+        begin
+         {Add Button Name}
+         AddItem(AResponse,'',Names.Strings[Count]);
+        end;
+      end;
+     Names.Free;
+     
+     AddBlank(AResponse);
+
+     AddItem(AResponse,'Receive Count:',IntToStr(MouseDevice.ReceiveCount));
+     AddItem(AResponse,'Receive Errors:',IntToStr(MouseDevice.ReceiveErrors));
+     AddItem(AResponse,'Buffer Overruns:',IntToStr(MouseDevice.BufferOverruns));
+     AddBlank(AResponse);
+     
+     FlagNames.Free;
+    end
+   else
+    begin
+     AddItem(AResponse,'Not Found','');
+    end;    
+
+   {Add Footer}
+   AddFooter(AResponse); 
+  end
+ else
+  begin
+   {Add Header (4 column)}
+   AddHeaderEx(AResponse,GetTitle,'',Self,4); 
+
+   {Add Mouse List} 
+   AddBold4Column(AResponse,'Mouse Id','Name','State','Type');
+   AddBlankEx(AResponse,4);
+
+   {Setup Data}
+   Data.Document:=Self;
+   Data.Host:=AHost;
+   Data.Request:=ARequest;
+   Data.Response:=AResponse;
+   Data.ContentStream:=nil;
+   Data.Data:=nil;
+
+   {Enumerate Mice}
+   MouseDeviceEnumerate(WebStatusMouseEnumerate,@Data);
+
+   {Add Footer (4 column)}
+   AddFooterEx(AResponse,4); 
+  end;
+
  {Return Result}
  Result:=True;
 end;
@@ -9995,9 +11689,67 @@ end;
 
 {==============================================================================}
 
+function TWebStatusTouch.TouchFlagsToFlagNames(AFlags:LongWord):TStringList;
+begin
+ {}
+ Result:=TStringList.Create;
+
+ {Check Flags}
+ if (AFlags and TOUCH_FLAG_NON_BLOCK) = TOUCH_FLAG_NON_BLOCK then
+  begin
+   Result.Add('TOUCH_FLAG_NON_BLOCK');
+  end;
+ if (AFlags and TOUCH_FLAG_PEEK_BUFFER) = TOUCH_FLAG_PEEK_BUFFER then
+  begin
+   Result.Add('TOUCH_FLAG_PEEK_BUFFER');
+  end;
+ if (AFlags and TOUCH_FLAG_MOUSE_DATA) = TOUCH_FLAG_MOUSE_DATA then
+  begin
+   Result.Add('TOUCH_FLAG_MOUSE_DATA');
+  end;
+ if (AFlags and TOUCH_FLAG_MULTI_POINT) = TOUCH_FLAG_MULTI_POINT then
+  begin
+   Result.Add('TOUCH_FLAG_MULTI_POINT');
+  end;
+ if (AFlags and TOUCH_FLAG_PRESSURE) = TOUCH_FLAG_PRESSURE then
+  begin
+   Result.Add('TOUCH_FLAG_PRESSURE');
+  end;
+ if (AFlags and TOUCH_FLAG_SWAP_XY) = TOUCH_FLAG_SWAP_XY then
+  begin
+   Result.Add('TOUCH_FLAG_SWAP_XY');
+  end;
+ if (AFlags and TOUCH_FLAG_INVERT_X) = TOUCH_FLAG_INVERT_X then
+  begin
+   Result.Add('TOUCH_FLAG_INVERT_X');
+  end;
+ if (AFlags and TOUCH_FLAG_INVERT_Y) = TOUCH_FLAG_INVERT_Y then
+  begin
+   Result.Add('TOUCH_FLAG_INVERT_Y');
+  end;
+ if (AFlags and TOUCH_FLAG_SWAP_MAX_XY) = TOUCH_FLAG_SWAP_MAX_XY then
+  begin
+   Result.Add('TOUCH_FLAG_SWAP_MAX_XY');
+  end;
+
+ {Check Flags}
+ if Result.Count = 0 then
+  begin
+   Result.Add('TOUCH_FLAG_NONE');
+  end; 
+end;
+
+{==============================================================================}
+
 function TWebStatusTouch.DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;AResponse:THTTPServerResponse):Boolean;
 var
+ Id:LongWord;
+ Action:String;
+ Count:Integer;
+ WorkBuffer:String;
  Data:TWebStatusData;
+ FlagNames:TStringList;
+ TouchDevice:PTouchDevice;
 begin
  {}
  Result:=False;
@@ -10011,26 +11763,303 @@ begin
  {Check Response}
  if AResponse = nil then Exit;
 
- {Add Header (4 column)}
- AddHeaderEx(AResponse,GetTitle,'',Self,4); 
+ {Get Action}
+ Action:=Uppercase(ARequest.GetParam('ACTION'));
 
- {Add Touch List} 
- AddBold4Column(AResponse,'Touch Id','Name','State','Type');
- AddBlankEx(AResponse,4);
- 
- {Setup Data}
- Data.Document:=Self;
- Data.Host:=AHost;
- Data.Request:=ARequest;
- Data.Response:=AResponse;
- Data.Data:=nil;
- 
- {Enumerate Touch}
- TouchDeviceEnumerate(WebStatusTouchEnumerate,@Data);
- 
- {Add Footer (4 column)}
- AddFooterEx(AResponse,4); 
- 
+ {Get Id}
+ WorkBuffer:=Uppercase(ARequest.GetParam('ID'));
+
+ if (Action = 'TOUCH') and (Length(WorkBuffer) > 0) then
+  begin
+   {Add Header (2 column with Caption)}
+   AddHeaderEx(AResponse,GetTitle,'Touch Information',Self,2);
+
+   {Get Id}
+   Id:=StrToIntDef(WorkBuffer,0);
+
+   {Get Touch Device}
+   TouchDevice:=TouchDeviceFind(Id);
+   if TouchDevice <> nil then
+    begin
+     {Get Flags Names}
+     FlagNames:=TouchFlagsToFlagNames(TouchDevice.Device.DeviceFlags);
+
+     AddBold(AResponse,'Touch','');
+     AddBlank(AResponse);
+     AddItem(AResponse,'Name:',DeviceGetName(@TouchDevice.Device));
+     AddItem(AResponse,'Type:',TouchDeviceTypeToString(TouchDevice.Device.DeviceType));
+     AddItem(AResponse,'Flags:',FlagNames.Strings[0]);
+
+     {Check Flag Count}
+     if FlagNames.Count > 1 then
+      begin
+       for Count:=1 to FlagNames.Count - 1 do
+        begin
+         {Add Flag Name}
+         AddItem(AResponse,'',FlagNames.Strings[Count]);
+        end;
+      end;
+
+     AddItem(AResponse,'Description:',TouchDevice.Device.DeviceDescription);
+     AddBlank(AResponse);
+     AddItem(AResponse,'Id:',IntToStr(TouchDevice.TouchId));
+     AddItem(AResponse,'State:',TouchDeviceStateToString(TouchDevice.TouchState));
+     AddBlank(AResponse);
+
+     AddItem(AResponse,'Width:',IntToStr(TouchDevice.Properties.Width));
+     AddItem(AResponse,'Height:',IntToStr(TouchDevice.Properties.Height));
+     AddItem(AResponse,'Rotation:',TouchDeviceRotationToString(TouchDevice.Properties.Rotation));
+     AddItem(AResponse,'Max X:',IntToStr(TouchDevice.Properties.MaxX));
+     AddItem(AResponse,'Max Y:',IntToStr(TouchDevice.Properties.MaxY));
+     AddItem(AResponse,'Max Z:',IntToStr(TouchDevice.Properties.MaxZ));
+     AddItem(AResponse,'Max Width:',IntToStr(TouchDevice.Properties.MaxWidth));
+     AddItem(AResponse,'Max Height:',IntToStr(TouchDevice.Properties.MaxHeight));
+     AddItem(AResponse,'Max Points:',IntToStr(TouchDevice.Properties.MaxPoints));
+     AddBlank(AResponse);
+
+     AddItem(AResponse,'Receive Count:',IntToStr(TouchDevice.ReceiveCount));
+     AddItem(AResponse,'Receive Errors:',IntToStr(TouchDevice.ReceiveErrors));
+     AddItem(AResponse,'Buffer Overruns:',IntToStr(TouchDevice.BufferOverruns));
+     AddBlank(AResponse);
+
+     FlagNames.Free;
+    end
+   else
+    begin
+     AddItem(AResponse,'Not Found','');
+    end;    
+
+   {Add Footer}
+   AddFooter(AResponse); 
+  end
+ else
+  begin
+   {Add Header (4 column)}
+   AddHeaderEx(AResponse,GetTitle,'',Self,4); 
+
+   {Add Touch List} 
+   AddBold4Column(AResponse,'Touch Id','Name','State','Type');
+   AddBlankEx(AResponse,4);
+
+   {Setup Data}
+   Data.Document:=Self;
+   Data.Host:=AHost;
+   Data.Request:=ARequest;
+   Data.Response:=AResponse;
+   Data.ContentStream:=nil;
+   Data.Data:=nil;
+
+   {Enumerate Touch}
+   TouchDeviceEnumerate(WebStatusTouchEnumerate,@Data);
+
+   {Add Footer (4 column)}
+   AddFooterEx(AResponse,4); 
+  end;
+
+ {Return Result}
+ Result:=True;
+end;
+
+{==============================================================================}
+{==============================================================================}
+{TWebStatusJoystick}
+constructor TWebStatusJoystick.Create(AMain:TWebStatusMain);
+begin
+ {}
+ FCaption:='Joystick'; {Must be before create for register}
+ inherited Create(AMain);
+ Name:='/joystick';
+
+ if FMain <> nil then Name:=FMain.Name + Name;
+end;
+
+{==============================================================================}
+
+function TWebStatusJoystick.JoystickFlagsToFlagNames(AFlags:LongWord):TStringList;
+begin
+ {}
+ Result:=TStringList.Create;
+
+ {Check Flags}
+ if (AFlags and JOYSTICK_FLAG_NON_BLOCK) = JOYSTICK_FLAG_NON_BLOCK then
+  begin
+   Result.Add('JOYSTICK_FLAG_NON_BLOCK');
+  end;
+ if (AFlags and JOYSTICK_FLAG_PEEK_BUFFER) = JOYSTICK_FLAG_PEEK_BUFFER then
+  begin
+   Result.Add('JOYSTICK_FLAG_PEEK_BUFFER');
+  end;
+ if (AFlags and JOYSTICK_FLAG_LED) = JOYSTICK_FLAG_LED then
+  begin
+   Result.Add('JOYSTICK_FLAG_LED');
+  end;
+ if (AFlags and JOYSTICK_FLAG_RGBLED) = JOYSTICK_FLAG_RGBLED then
+  begin
+   Result.Add('JOYSTICK_FLAG_RGBLED');
+  end;
+ if (AFlags and JOYSTICK_FLAG_RUMBLE) = JOYSTICK_FLAG_RUMBLE then
+  begin
+   Result.Add('JOYSTICK_FLAG_RUMBLE');
+  end;
+ if (AFlags and JOYSTICK_FLAG_GYROSCOPE) = JOYSTICK_FLAG_GYROSCOPE then
+  begin
+   Result.Add('JOYSTICK_FLAG_GYROSCOPE');
+  end;
+ if (AFlags and JOYSTICK_FLAG_TOUCHPAD) = JOYSTICK_FLAG_TOUCHPAD then
+  begin
+   Result.Add('JOYSTICK_FLAG_TOUCHPAD');
+  end;
+
+ {Check Flags}
+ if Result.Count = 0 then
+  begin
+   Result.Add('JOYSTICK_FLAG_NONE');
+  end;
+end;
+
+{==============================================================================}
+
+function TWebStatusJoystick.DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;AResponse:THTTPServerResponse):Boolean;
+var
+ Id:LongWord;
+ Action:String;
+ Count:Integer;
+ WorkBuffer:String;
+ Data:TWebStatusData;
+ FlagNames:TStringList;
+ JoystickDevice:PJoystickDevice;
+begin
+ {}
+ Result:=False;
+
+ {Check Host}
+ if AHost = nil then Exit;
+
+ {Check Request}
+ if ARequest = nil then Exit;
+
+ {Check Response}
+ if AResponse = nil then Exit;
+
+ {Get Action}
+ Action:=Uppercase(ARequest.GetParam('ACTION'));
+
+ {Get Id}
+ WorkBuffer:=Uppercase(ARequest.GetParam('ID'));
+
+ if (Action = 'JOYSTICK') and (Length(WorkBuffer) > 0) then
+  begin
+   {Add Header (2 column with Caption)}
+   AddHeaderEx(AResponse,GetTitle,'Joystick Information',Self,2);
+
+   {Get Id}
+   Id:=StrToIntDef(WorkBuffer,0);
+
+   {Get Joystick Device}
+   JoystickDevice:=JoystickDeviceFind(Id);
+   if JoystickDevice <> nil then
+    begin
+     {Get Flags Names}
+     FlagNames:=JoystickFlagsToFlagNames(JoystickDevice.Device.DeviceFlags);
+
+     AddBold(AResponse,'Joystick','');
+     AddBlank(AResponse);
+     AddItem(AResponse,'Name:',DeviceGetName(@JoystickDevice.Device));
+     AddItem(AResponse,'Type:',JoystickDeviceTypeToString(JoystickDevice.Device.DeviceType));
+     AddItem(AResponse,'Flags:',FlagNames.Strings[0]);
+
+     {Check Flag Count}
+     if FlagNames.Count > 1 then
+      begin
+       for Count:=1 to FlagNames.Count - 1 do
+        begin
+         {Add Flag Name}
+         AddItem(AResponse,'',FlagNames.Strings[Count]);
+        end;
+      end;
+
+     AddItem(AResponse,'Description:',JoystickDevice.Device.DeviceDescription);
+     AddBlank(AResponse);
+     AddItem(AResponse,'Id:',IntToStr(JoystickDevice.JoystickId));
+     AddItem(AResponse,'State:',JoystickDeviceStateToString(JoystickDevice.JoystickState));
+     AddBlank(AResponse);
+
+     AddItem(AResponse,'Axis Count:',IntToStr(JoystickDevice.Properties.AxisCount));
+     for Count:=0 to JoystickDevice.Properties.AxisCount - 1 do
+      begin
+       AddItem(AResponse,'Axis ' + IntToStr(Count + 1),'');
+       AddItemEx(AResponse,'Name:',JoystickDeviceAxisToString(JoystickDevice.Properties.Axes[Count].Name),5);
+       AddItemEx(AResponse,'Logical Minimum:',IntToStr(JoystickDevice.Properties.Axes[Count].Logical.Minimum),5);
+       AddItemEx(AResponse,'Logical Maximum:',IntToStr(JoystickDevice.Properties.Axes[Count].Logical.Maximum),5);
+       AddItemEx(AResponse,'Physical Minimum:',IntToStr(JoystickDevice.Properties.Axes[Count].Physical.Minimum),5);
+       AddItemEx(AResponse,'Physical Maximum:',IntToStr(JoystickDevice.Properties.Axes[Count].Physical.Maximum),5);
+       AddItemEx(AResponse,'Multiplier:',FloatToStr(JoystickDevice.Properties.Axes[Count].Multiplier),5);
+       AddItemEx(AResponse,'Resolution:',FloatToStr(JoystickDevice.Properties.Axes[Count].Resolution),5);
+       AddBlank(AResponse);
+      end;
+     if JoystickDevice.Properties.AxisCount = 0 then AddBlank(AResponse);
+
+     AddItem(AResponse,'Hat Count:',IntToStr(JoystickDevice.Properties.HatCount));
+     for Count:=0 to JoystickDevice.Properties.HatCount - 1 do
+      begin
+       AddItem(AResponse,'Hat ' + IntToStr(Count + 1),'');
+       AddItemEx(AResponse,'Name:',JoystickDeviceHatToString(JoystickDevice.Properties.Hats[Count].Name),5);
+       AddItemEx(AResponse,'Logical Minimum:',IntToStr(JoystickDevice.Properties.Hats[Count].Logical.Minimum),5);
+       AddItemEx(AResponse,'Logical Maximum:',IntToStr(JoystickDevice.Properties.Hats[Count].Logical.Maximum),5);
+       AddItemEx(AResponse,'Physical Minimum:',IntToStr(JoystickDevice.Properties.Hats[Count].Physical.Minimum),5);
+       AddItemEx(AResponse,'Physical Maximum:',IntToStr(JoystickDevice.Properties.Hats[Count].Physical.Maximum),5);
+       AddItemEx(AResponse,'Multiplier:',FloatToStr(JoystickDevice.Properties.Hats[Count].Multiplier),5);
+       AddItemEx(AResponse,'Resolution:',FloatToStr(JoystickDevice.Properties.Hats[Count].Resolution),5);
+       AddBlank(AResponse);
+      end;
+     if JoystickDevice.Properties.HatCount = 0 then AddBlank(AResponse);
+
+     AddItem(AResponse,'Button Count:',IntToStr(JoystickDevice.Properties.ButtonCount));
+     for Count:=0 to JoystickDevice.Properties.ButtonCount - 1 do
+      begin
+       AddItem(AResponse,'Button ' + IntToStr(Count + 1) + ':',JoystickDeviceButtonToString(JoystickDevice.Properties.Buttons[Count]));
+      end;
+     AddBlank(AResponse);
+
+     AddItem(AResponse,'Receive Count:',IntToStr(JoystickDevice.ReceiveCount));
+     AddItem(AResponse,'Receive Errors:',IntToStr(JoystickDevice.ReceiveErrors));
+     AddItem(AResponse,'Buffer Overruns:',IntToStr(JoystickDevice.BufferOverruns));
+     AddBlank(AResponse);
+
+     FlagNames.Free;
+    end
+   else
+    begin
+     AddItem(AResponse,'Not Found','');
+    end;
+
+   {Add Footer}
+   AddFooter(AResponse);
+  end
+ else
+  begin
+   {Add Header (4 column)}
+   AddHeaderEx(AResponse,GetTitle,'',Self,4);
+
+   {Add Joystick List}
+   AddBold4Column(AResponse,'Joystick Id','Name','State','Type');
+   AddBlankEx(AResponse,4);
+
+   {Setup Data}
+   Data.Document:=Self;
+   Data.Host:=AHost;
+   Data.Request:=ARequest;
+   Data.Response:=AResponse;
+   Data.ContentStream:=nil;
+   Data.Data:=nil;
+
+   {Enumerate Joystick}
+   JoystickDeviceEnumerate(WebStatusJoystickEnumerate,@Data);
+
+   {Add Footer (4 column)}
+   AddFooterEx(AResponse,4);
+  end;
+
  {Return Result}
  Result:=True;
 end;
@@ -10166,7 +12195,7 @@ begin
    if FramebufferDeviceGetProperties(FramebufferDeviceGetDefault,@FramebufferProperties) = ERROR_SUCCESS then
     begin
      AddBlank(AResponse);
-     AddItemEx(AResponse,'Flags:',IntToHex(FramebufferProperties.Flags,8),2);
+     AddItemEx(AResponse,'Flags:','0x' + IntToHex(FramebufferProperties.Flags,8),2);
      AddBlank(AResponse);
      AddItemEx(AResponse,'Address:','0x' + AddrToHex(FramebufferProperties.Address),2);
      AddItemEx(AResponse,'Size:',IntToStr(FramebufferProperties.Size),2);
@@ -10219,7 +12248,7 @@ begin
        if FramebufferDeviceGetProperties(FramebufferDevice,@FramebufferProperties) = ERROR_SUCCESS then
         begin
          AddBlank(AResponse);
-         AddItemEx(AResponse,'Flags:',IntToHex(FramebufferProperties.Flags,8),2);
+         AddItemEx(AResponse,'Flags:','0x' + IntToHex(FramebufferProperties.Flags,8),2);
          AddBlank(AResponse);
          AddItemEx(AResponse,'Address:','0x' + AddrToHex(FramebufferProperties.Address),2);
          AddItemEx(AResponse,'Size:',IntToStr(FramebufferProperties.Size),2);
@@ -10512,7 +12541,7 @@ end;
 
 function TWebStatusPageTables.DoGet(AHost:THTTPHost;ARequest:THTTPServerRequest;AResponse:THTTPServerResponse):Boolean;
 var
- Count:LongWord;
+ Count:Integer;
  Address:PtrUInt;
  Repeated:LongWord;
  FlagNames:TStringList;
@@ -11431,6 +13460,18 @@ begin
  AddBlank(AResponse);
  AddItemEx(AResponse,'TOUCH_MOUSE_DATA_DEFAULT:',BooleanToString(TOUCH_MOUSE_DATA_DEFAULT),2);
  AddBlank(AResponse);
+
+ {Add HID configuration}
+ AddBold(AResponse,'HID configuration','');
+ AddBlank(AResponse);
+ AddItemEx(AResponse,'HID_REGISTER_KEYBOARD:',BooleanToString(HID_REGISTER_KEYBOARD),2);
+ AddItemEx(AResponse,'HID_REGISTER_MOUSE:',BooleanToString(HID_REGISTER_MOUSE),2);
+ AddItemEx(AResponse,'HID_REGISTER_TOUCH:',BooleanToString(HID_REGISTER_TOUCH),2);
+ AddItemEx(AResponse,'HID_REGISTER_JOYSTICK:',BooleanToString(HID_REGISTER_JOYSTICK),2);
+ AddItemEx(AResponse,'HID_REGISTER_GAMEPAD:',BooleanToString(HID_REGISTER_GAMEPAD),2);
+ AddBlank(AResponse);
+ AddItemEx(AResponse,'HID_MOUSE_REJECT_TOUCH:',BooleanToString(HID_MOUSE_REJECT_TOUCH),2);
+ AddBlank(AResponse);
  
  {Add PCI configuration}
  AddBold(AResponse,'PCI configuration','');
@@ -11456,6 +13497,8 @@ begin
  AddBlank(AResponse);
  AddItemEx(AResponse,'USB_HUB_MESSAGESLOT_MAXIMUM:',IntToStr(USB_HUB_MESSAGESLOT_MAXIMUM),2);
  AddItemEx(AResponse,'USB_HUB_REGISTER_DRIVER:',BooleanToString(USB_HUB_REGISTER_DRIVER),2);
+ AddBlank(AResponse);
+ AddItemEx(AResponse,'USB_HID_REGISTER_DRIVER:',BooleanToString(USB_HID_REGISTER_DRIVER),2);
  AddBlank(AResponse);
  AddItemEx(AResponse,'USB_KEYBOARD_POLLING_INTERVAL:',IntToStr(USB_KEYBOARD_POLLING_INTERVAL),2);
  AddItemEx(AResponse,'USB_KEYBOARD_REGISTER_DRIVER:',BooleanToString(USB_KEYBOARD_REGISTER_DRIVER),2);
@@ -11705,6 +13748,7 @@ begin
    Data.Host:=AHost;
    Data.Request:=ARequest;
    Data.Response:=AResponse;
+   Data.ContentStream:=nil;
    Data.Data:=nil;
    
    {Display Tree}
@@ -12364,6 +14408,7 @@ end;
 function WebStatusRegister(AListener:THTTPListener;const AHost,AURL:String;ARedirect:Boolean):Boolean;
 var
  WorkInt:LongWord;
+ WorkBool:LongBool;
 begin
  {}
  Result:=False;
@@ -12448,6 +14493,10 @@ begin
  WebStatusMMC:=TWebStatusMMC.Create(WebStatusMain);
  AListener.RegisterDocument(AHost,WebStatusMMC);
 
+ {Register HID Page}
+ WebStatusHID:=TWebStatusHID.Create(WebStatusMain);
+ AListener.RegisterDocument(AHost,WebStatusHID);
+
  {Register Network Page}
  WebStatusNetwork:=TWebStatusNetwork.Create(WebStatusMain);
  AListener.RegisterDocument(AHost,WebStatusNetwork);
@@ -12475,6 +14524,10 @@ begin
  {Register Touch Page}
  WebStatusTouch:=TWebStatusTouch.Create(WebStatusMain);
  AListener.RegisterDocument(AHost,WebStatusTouch);
+
+ {Register Joystick Page}
+ WebStatusJoystick:=TWebStatusJoystick.Create(WebStatusMain);
+ AListener.RegisterDocument(AHost,WebStatusJoystick);
 
  {Register Framebuffer Page}
  WebStatusFramebuffer:=TWebStatusFramebuffer.Create(WebStatusMain);
@@ -12533,6 +14586,14 @@ begin
  WorkInt:=StrToIntDef(SysUtils.GetEnvironmentVariable('WEBSTATUS_HEAP_USED_COUNT'),0);
  if WorkInt > 0 then WEBSTATUS_HEAP_USED_COUNT:=WorkInt;
  
+ {WEBSTATUS_ALLOW_RESTART}
+ WorkBool:=StrToBoolDef(SysUtils.GetEnvironmentVariable('WEBSTATUS_ALLOW_RESTART'),WEBSTATUS_ALLOW_RESTART);
+ if WorkBool <> WEBSTATUS_ALLOW_RESTART then WEBSTATUS_ALLOW_RESTART:=WorkBool;
+
+ {WEBSTATUS_ALLOW_SHUTDOWN}
+ WorkBool:=StrToBoolDef(SysUtils.GetEnvironmentVariable('WEBSTATUS_ALLOW_SHUTDOWN'),WEBSTATUS_ALLOW_SHUTDOWN);
+ if WorkBool <> WEBSTATUS_ALLOW_SHUTDOWN then WEBSTATUS_ALLOW_SHUTDOWN:=WorkBool;
+ 
  {Return Result}
  Result:=True;
 end;
@@ -12588,13 +14649,17 @@ begin
  AListener.DeregisterDocument(AHost,WebStatusFramebuffer);
  WebStatusFramebuffer.Free;
   
- {Deregister Mouse Page}
- AListener.DeregisterDocument(AHost,WebStatusMouse);
- WebStatusMouse.Free;
+ {Deregister Joystick Page}
+ AListener.DeregisterDocument(AHost,WebStatusJoystick);
+ WebStatusJoystick.Free;
 
  {Deregister Touch Page}
  AListener.DeregisterDocument(AHost,WebStatusTouch);
  WebStatusTouch.Free;
+
+ {Deregister Mouse Page}
+ AListener.DeregisterDocument(AHost,WebStatusMouse);
+ WebStatusMouse.Free;
  
  {Deregister Keyboard Page}
  AListener.DeregisterDocument(AHost,WebStatusKeyboard);
@@ -12615,6 +14680,10 @@ begin
  {Deregister Network Page}
  AListener.DeregisterDocument(AHost,WebStatusNetwork);
  WebStatusNetwork.Free;
+
+ {Deregister HID Page}
+ AListener.DeregisterDocument(AHost,WebStatusHID);
+ WebStatusHID.Free;
 
  {Deregister MMC Page}
  AListener.DeregisterDocument(AHost,WebStatusMMC);
@@ -12829,7 +14898,7 @@ end;
 
 function WebStatusHandleEnumerate(Handle:PHandleEntry;Data:Pointer):LongWord;
 var
- Count:LongWord;
+ Count:Integer;
  FlagNames:TStringList;
  Document:TWebStatusSub;
  Response:THTTPServerResponse;
@@ -12965,8 +15034,10 @@ end;
 
 procedure WebStatusUSBLogOutput(const AText:String;Data:Pointer); 
 var
+ Value:String;
  Document:TWebStatusSub;
  Response:THTTPServerResponse;
+ ContentStream:TStream;
 begin
  {}
  {Check Data}
@@ -12980,8 +15051,21 @@ begin
  Response:=PWebStatusData(Data).Response;
  if Response = nil then Exit;
 
- {Add Output}
- Document.AddItemSpan(Response,'<pre>' + AText + '</pre>',2,False);
+ {Get Content Stream}
+ ContentStream:=PWebStatusData(Data).ContentStream;
+ if ContentStream = nil then
+  begin
+   {Add Output}
+   Document.AddItemSpan(Response,'<pre>' + AText + '</pre>',2,False);
+  end
+ else
+  begin
+   {Get Content}
+   Value:=AText + HTTP_LINE_END;
+   
+   {Add Content}
+   ContentStream.Write(AnsiString(Value)[1],Length(Value) * SizeOf(AnsiChar));
+  end;
 end;
 
 {==============================================================================}
@@ -13238,6 +15322,66 @@ end;
 
 {==============================================================================}
 
+function WebStatusHIDDeviceEnumerate(Device:PHIDDevice;Data:Pointer):LongWord;
+var
+ Document:TWebStatusSub;
+ Response:THTTPServerResponse;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+ 
+ {Check Device}
+ if Device = nil then Exit;
+ 
+ {Check Data}
+ if Data = nil then Exit;
+ 
+ {Get Document}
+ Document:=PWebStatusData(Data).Document;
+ if Document = nil then Exit;
+ 
+ {Get Response}
+ Response:=PWebStatusData(Data).Response;
+ if Response = nil then Exit;
+ 
+ {Add Device}
+ Document.AddItem4Column(Response,Document.MakeLink(IntToStr(Device.HIDId),Document.Name + '?action=hiddevice&id=' + IntToStr(Device.HIDId)),DeviceGetName(@Device.Device),HIDDeviceStateToString(Device.HIDState),HIDDeviceTypeToString(Device.Device.DeviceType));
+ 
+ Result:=ERROR_SUCCESS;
+end;
+
+{==============================================================================}
+
+function WebStatusHIDConsumerEnumerate(Consumer:PHIDConsumer;Data:Pointer):LongWord;
+var
+ Document:TWebStatusSub;
+ Response:THTTPServerResponse;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {Check Consumer}
+ if Consumer = nil then Exit;
+ 
+ {Check Data}
+ if Data = nil then Exit;
+ 
+ {Get Document}
+ Document:=PWebStatusData(Data).Document;
+ if Document = nil then Exit;
+ 
+ {Get Response}
+ Response:=PWebStatusData(Data).Response;
+ if Response = nil then Exit;
+
+ {Add Consumer}
+ Document.AddItem4Column(Response,IntToStr(Consumer.Driver.DriverId),DriverGetName(@Consumer.Driver),DriverStateToString(Consumer.Driver.DriverState),'');
+ 
+ Result:=ERROR_SUCCESS;
+end;
+
+{==============================================================================}
+
 function WebStatusNetworkEnumerate(Network:PNetworkDevice;Data:Pointer):LongWord;
 var
  Document:TWebStatusSub;
@@ -13291,7 +15435,7 @@ begin
  if Response = nil then Exit;
  
  {Add Storage}
- Document.AddItem4Column(Response,IntToStr(Storage.StorageId),DeviceGetName(@Storage.Device),StorageDeviceStateToString(Storage.StorageState),StorageDeviceTypeToString(Storage.Device.DeviceType));
+ Document.AddItem4Column(Response,Document.MakeLink(IntToStr(Storage.StorageId),Document.Name + '?action=storage&id=' + IntToStr(Storage.StorageId)),DeviceGetName(@Storage.Device),StorageDeviceStateToString(Storage.StorageState),StorageDeviceTypeToString(Storage.Device.DeviceType));
  
  Result:=ERROR_SUCCESS;
 end;
@@ -13386,6 +15530,36 @@ begin
  Result:=ERROR_SUCCESS;
 end;
  
+{==============================================================================}
+
+function WebStatusJoystickEnumerate(Joystick:PJoystickDevice;Data:Pointer):LongWord;
+var
+ Document:TWebStatusSub;
+ Response:THTTPServerResponse;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+ 
+ {Check Joystick}
+ if Joystick = nil then Exit;
+ 
+ {Check Data}
+ if Data = nil then Exit;
+ 
+ {Get Document}
+ Document:=PWebStatusData(Data).Document;
+ if Document = nil then Exit;
+ 
+ {Get Response}
+ Response:=PWebStatusData(Data).Response;
+ if Response = nil then Exit;
+ 
+ {Add Joystick}
+ Document.AddItem4Column(Response,Document.MakeLink(IntToStr(Joystick.JoystickId),Document.Name + '?action=joystick&id=' + IntToStr(Joystick.JoystickId)),DeviceGetName(@Joystick.Device),JoystickDeviceStateToString(Joystick.JoystickState),JoystickDeviceTypeToString(Joystick.Device.DeviceType));
+ 
+ Result:=ERROR_SUCCESS;
+end;
+
 {==============================================================================}
  
 function WebStatusConsoleWindowEnumerate(Console:PConsoleDevice;Handle:TWindowHandle;Data:Pointer):LongWord;

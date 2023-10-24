@@ -1,7 +1,7 @@
 {
 Ultibo Global Define Defaults.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -139,9 +139,6 @@ Global Defines
  {$DEFINE CDFS_DEBUG}
  {$DEFINE NTFS_DEBUG}
  {$DEFINE EXTFS_DEBUG} 
- {$DEFINE HPFS_DEBUG} 
- {$DEFINE NSS_DEBUG} 
- {$DEFINE NWFS_DEBUG} 
  {$DEFINE VIRTUAL_DEBUG}
  {$DEFINE CACHE_DEBUG} 
 {$ENDIF}
@@ -167,9 +164,11 @@ Global Defines
  {$DEFINE DNS_DEBUG} 
 {$ENDIF}
 
+{--$DEFINE HID_DEBUG}             {Enable debug output/counters for HID devices (Default: Off)}
 {--$DEFINE KEYBOARD_DEBUG}        {Enable debug output/counters for Keyboard devices (Default: Off)}
 {--$DEFINE MOUSE_DEBUG}           {Enable debug output/counters for Mouse devices (Default: Off)}
 {--$DEFINE TOUCH_DEBUG}           {Enable debug output/counters for Touch devices (Default: Off)}
+{--$DEFINE JOYSTICK_DEBUG}        {Enable debug output/counters for Joystick/Gamepad devices (Default: Off)}
 
 {$DEFINE WIFI_DEBUG}            {Enable debug output/counters for WiFi devices (Default: Off)}
 {--$DEFINE VPN_DEBUG}             {Enable debug output/counters for VPN devices (Default: Off)}
@@ -375,10 +374,12 @@ Global Defines
 {$DEFINE API_EXPORT_FONT}            {Enable the library API unit to export symbols for the Font unit (Default: On)}
 {$DEFINE API_EXPORT_FRAMEBUFFER}     {Enable the library API unit to export symbols for the Framebuffer unit (Default: On)}
 {$DEFINE API_EXPORT_GRAPHICSCONSOLE} {Enable the library API unit to export symbols for the GraphicsConsole unit (Default: On)}
+{$DEFINE API_EXPORT_HID}             {Enable the library API unit to export symbols for the HID unit (Default: On)}
 {$DEFINE API_EXPORT_KEYMAP}          {Enable the library API unit to export symbols for the Keymap unit (Default: On)}
 {$DEFINE API_EXPORT_KEYBOARD}        {Enable the library API unit to export symbols for the Keyboard unit (Default: On)}
 {$DEFINE API_EXPORT_MOUSE}           {Enable the library API unit to export symbols for the Mouse unit (Default: On)}
 {$DEFINE API_EXPORT_TOUCH}           {Enable the library API unit to export symbols for the Touch unit (Default: On)}
+{$DEFINE API_EXPORT_JOYSTICK}        {Enable the library API unit to export symbols for the Joystick unit (Default: On)}
 {$DEFINE API_EXPORT_STORAGE}         {Enable the library API unit to export symbols for the Storage unit (Default: On)}
 {$DEFINE API_EXPORT_NETWORK}         {Enable the library API unit to export symbols for the Network unit (Default: On)}
 {$DEFINE API_EXPORT_TIMEZONE}        {Enable the library API unit to export symbols for the Timezone unit (Default: On)}
@@ -400,6 +401,14 @@ Global Defines
 
 {$IFDEF API_EXPORT_THREADS}
  {$DEFINE API_EXPORT_PLATFORM}
+{$ENDIF}
+
+{$IFDEF API_EXPORT_WINSOCK}
+ {$UNDEF SYSCALLS_EXPORT_SOCKETS}
+{$ENDIF}
+
+{$IFDEF API_EXPORT_WINSOCK2}
+ {$UNDEF SYSCALLS_EXPORT_SOCKETS}
 {$ENDIF}
 
 {==============================================================================}
@@ -435,6 +444,11 @@ Global Defines
 {$DEFINE BCM2710_UART0_RX_BUFFER}   {Enable receive buffering for BCM2710 UART0 (Default: On)}
 {$DEFINE BCM2711_UART0_RX_BUFFER}   {Enable receive buffering for BCM2711 UART0 (Default: On)}
 
+{-$DEFINE BCM2708_I2CSLAVE_TX_BUFFER} {Enable transmit buffering for BCM2708 I2C Slave (Default: Off)}
+{-$DEFINE BCM2709_I2CSLAVE_TX_BUFFER} {Enable transmit buffering for BCM2709 I2C Slave (Default: Off)}
+{-$DEFINE BCM2710_I2CSLAVE_TX_BUFFER} {Enable transmit buffering for BCM2710 I2C Slave (Default: Off)}
+{-$DEFINE BCM2711_I2CSLAVE_TX_BUFFER} {Enable transmit buffering for BCM2711 I2C Slave (Default: Off)}
+
 {--$DEFINE RPI2_CLOCK_SYSTEM_TIMER} {Use the System Timer for the Clock instead of the Virtual Timer on the RPi2 (Default: Off)}
 {--$DEFINE RPI3_CLOCK_SYSTEM_TIMER} {Use the System Timer for the Clock instead of the Virtual Timer on the RPi3 (Default: Off)}
 {--$DEFINE RPI4_CLOCK_SYSTEM_TIMER} {Use the System Timer for the Clock instead of the Virtual Timer on the RPi4 (Default: Off)}
@@ -447,6 +461,9 @@ Global Defines
 
 {==============================================================================}
 {==============================================================================}
+{FileSystem definitions}
+{$DEFINE FILESYS_INCREMENTAL_CACHE}              {Enable use of the incremental read/write cache (Default: On)}
+
 {BigInt definitions}
 {--$DEFINE BIGINT_DEBUG}                         {Enable debug output/functions for BitInt unit (Default: Off)}
 {$DEFINE BIGINT_SQUARE}                          {Enable use of squaring instead of multiplication (Default: On)}

@@ -1,7 +1,7 @@
 {
 Ultibo Winsock2 interface unit.
 
-Copyright (C) 2018 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -1176,6 +1176,14 @@ type
   FBoundAddress:String;
 
   FReuseAddress:Boolean;
+
+  FSendSize:Integer;
+  FReceiveSize:Integer;
+
+  FSendTimeout:Integer;
+  FReceiveTimeout:Integer;
+
+  FConnectTimeout:Integer;
   {}
   procedure SetFamily(AFamily:Integer); virtual;
   procedure SetSocketType(ASocketType:Integer); virtual;
@@ -1217,7 +1225,7 @@ type
   function AllocateFamily:Boolean; virtual;
 
   function AllocateAddress(var ALength:Integer):PSockAddr;
-  function ReleaseAddress(var ASockAddr:PSockAddr;var ALength:Integer):Boolean;
+  function ReleaseAddress(var ASockAddr:PSockAddr;var ALength:Integer;ALastError:Boolean = True):Boolean;
 
   function AllocateBoundAddress(var ALength:Integer):PSockAddr;
 
@@ -1411,7 +1419,6 @@ type
   FUseNagle:Boolean;
   FUseKeepalive:Boolean;
   FSegmentSize:Integer;
-  FMaxSegmentSize:LongWord;
 
   procedure SetSocketType(ASocketType:Integer); override;
   procedure SetProtocol(AProtocol:Integer); override;
@@ -1421,11 +1428,13 @@ type
   procedure SetUseNagle(AUseNagle:Boolean);
   procedure SetUseKeepalive(AUseKeepalive:Boolean);
   procedure SetSegmentSize(ASegmentSize:Integer);
+  function GetMaxSegmentSize:LongWord;
   procedure SetMaxSegmentSize(AMaxSegmentSize:LongWord);
  protected
   {}
   FBacklog:Integer;
-  
+  FMaxSegmentSize:LongWord;
+
   {}  
   function Listen(ABacklog:Integer):LongInt;
   
@@ -1441,7 +1450,7 @@ type
   property UseNagle:Boolean read FUseNagle write SetUseNagle;
   property UseKeepalive:Boolean read FUseKeepalive write SetUseKeepalive;
   property SegmentSize:Integer read FSegmentSize write SetSegmentSize;
-  property MaxSegmentSize:LongWord read FMaxSegmentSize write SetMaxSegmentSize;
+  property MaxSegmentSize:LongWord read GetMaxSegmentSize write SetMaxSegmentSize;
   
   {}
   function ReadData(AData:Pointer;ACount:Integer):Boolean;
@@ -2191,6 +2200,14 @@ begin
  FBoundAddress:='';
 
  FReuseAddress:=False;
+
+ FSendSize:=0;
+ FReceiveSize:=0;
+
+ FSendTimeout:=0;
+ FReceiveTimeout:=0;
+
+ FConnectTimeout:=0;
 end;
 
 {==============================================================================}
@@ -2389,7 +2406,7 @@ begin
     {$ENDIF}
    end;
  finally
-  ReleaseAddress(SockAddr,SockAddrLength);
+  ReleaseAddress(SockAddr,SockAddrLength,FLastError = ERROR_SUCCESS);
  end;
 end;
 
@@ -2556,12 +2573,13 @@ begin
  {$IFDEF WINSOCK2_DEBUG}
  if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket: GetSendSize');
  {$ENDIF}
- 
- FLastError:=WSAENOTCONN;
+
+ FLastError:=ERROR_SUCCESS;
+ Result:=FSendSize;
+
  if not Connected then Exit;
 
  Size:=SizeOf(Integer);
- FLastError:=ERROR_SUCCESS;
  if Winsock2.getsockopt(Handle,SOL_SOCKET,SO_SNDBUF,PChar(@Result),Size) = SOCKET_ERROR then
   begin
    FLastError:=Winsock2.WSAGetLastError;
@@ -2584,10 +2602,11 @@ begin
  if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket: SetSendSize');
  {$ENDIF}
  
- FLastError:=WSAENOTCONN;
+ FLastError:=ERROR_SUCCESS;
+ FSendSize:=ASize;
+
  if not Connected then Exit;
 
- FLastError:=ERROR_SUCCESS;
  if Winsock2.setsockopt(Handle,SOL_SOCKET,SO_SNDBUF,PChar(@ASize),SizeOf(Integer)) = SOCKET_ERROR then
   begin
    FLastError:=Winsock2.WSAGetLastError;
@@ -2613,11 +2632,12 @@ begin
  if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket: GetReceiveSize');
  {$ENDIF}
  
- FLastError:=WSAENOTCONN;
+ FLastError:=ERROR_SUCCESS;
+ Result:=FReceiveSize;
+
  if not Connected then Exit;
 
  Size:=SizeOf(Integer);
- FLastError:=ERROR_SUCCESS;
  if Winsock2.getsockopt(Handle,SOL_SOCKET,SO_RCVBUF,PChar(@Result),Size) = SOCKET_ERROR then
   begin
    FLastError:=Winsock2.WSAGetLastError;
@@ -2640,10 +2660,11 @@ begin
  if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket: SetReceiveSize');
  {$ENDIF}
  
- FLastError:=WSAENOTCONN;
- if not Connected then Exit;
-
  FLastError:=ERROR_SUCCESS;
+ FReceiveSize:=ASize;
+ 
+ if not Connected then Exit;
+ 
  if Winsock2.setsockopt(Handle,SOL_SOCKET,SO_RCVBUF,PChar(@ASize),SizeOf(Integer)) = SOCKET_ERROR then
   begin
    FLastError:=Winsock2.WSAGetLastError;
@@ -2669,11 +2690,12 @@ begin
  if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket: GetSendTimeout');
  {$ENDIF}
  
- FLastError:=WSAENOTCONN;
+ FLastError:=ERROR_SUCCESS;
+ Result:=FSendTimeout;
+
  if not Connected then Exit;
 
  Size:=SizeOf(Integer);
- FLastError:=ERROR_SUCCESS;
  if Winsock2.getsockopt(Handle,SOL_SOCKET,SO_SNDTIMEO,PChar(@Result),Size) = SOCKET_ERROR then
   begin
    FLastError:=Winsock2.WSAGetLastError;
@@ -2696,10 +2718,11 @@ begin
  if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket: SetSendTimeout');
  {$ENDIF}
  
- FLastError:=WSAENOTCONN;
+ FLastError:=ERROR_SUCCESS;
+ FSendTimeout:=ATimeout;
+
  if not Connected then Exit;
 
- FLastError:=ERROR_SUCCESS;
  if Winsock2.setsockopt(Handle,SOL_SOCKET,SO_SNDTIMEO,PChar(@ATimeout),SizeOf(Integer)) = SOCKET_ERROR then
   begin
    FLastError:=Winsock2.WSAGetLastError;
@@ -2725,11 +2748,12 @@ begin
  if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket: GetReceiveTimeout');
  {$ENDIF}
  
- FLastError:=WSAENOTCONN;
+ FLastError:=ERROR_SUCCESS;
+ Result:=FReceiveTimeout;
+
  if not Connected then Exit;
 
  Size:=SizeOf(Integer);
- FLastError:=ERROR_SUCCESS;
  if Winsock2.getsockopt(Handle,SOL_SOCKET,SO_RCVTIMEO,PChar(@Result),Size) = SOCKET_ERROR then
   begin
    FLastError:=Winsock2.WSAGetLastError;
@@ -2752,10 +2776,11 @@ begin
  if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket: SetReceiveTimeout');
  {$ENDIF}
  
- FLastError:=WSAENOTCONN;
- if not Connected then Exit;
-
  FLastError:=ERROR_SUCCESS;
+ FReceiveTimeout:=ATimeout;
+
+ if not Connected then Exit;
+ 
  if Winsock2.setsockopt(Handle,SOL_SOCKET,SO_RCVTIMEO,PChar(@ATimeout),SizeOf(Integer)) = SOCKET_ERROR then
   begin
    FLastError:=Winsock2.WSAGetLastError;
@@ -2781,11 +2806,12 @@ begin
  if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket: GetConnectTimeout');
  {$ENDIF}
  
- FLastError:=WSAENOTCONN;
+ FLastError:=ERROR_SUCCESS;
+ Result:=FConnectTimeout;
+
  if not Connected then Exit;
 
  Size:=SizeOf(Integer);
- FLastError:=ERROR_SUCCESS;
  if Winsock2.getsockopt(Handle,SOL_SOCKET,SO_CONNTIMEO,PChar(@Result),Size) = SOCKET_ERROR then
   begin
    FLastError:=Winsock2.WSAGetLastError;
@@ -2808,10 +2834,11 @@ begin
  if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket: SetConnectTimeout');
  {$ENDIF}
  
- FLastError:=WSAENOTCONN;
+ FLastError:=ERROR_SUCCESS;
+ FConnectTimeout:=ATimeout;
+
  if not Connected then Exit;
 
- FLastError:=ERROR_SUCCESS;
  if Winsock2.setsockopt(Handle,SOL_SOCKET,SO_CONNTIMEO,PChar(@ATimeout),SizeOf(Integer)) = SOCKET_ERROR then
   begin
    FLastError:=Winsock2.WSAGetLastError;
@@ -2984,13 +3011,13 @@ end;
 
 {==============================================================================}
 
-function TWinsock2Socket.ReleaseAddress(var ASockAddr:PSockAddr;var ALength:Integer):Boolean;
+function TWinsock2Socket.ReleaseAddress(var ASockAddr:PSockAddr;var ALength:Integer;ALastError:Boolean = True):Boolean;
 {Free a socket address structure allocated by AllocateAddress or AddressToSockAddr}
 begin
  {}
  Result:=False;
  try
-  FLastError:=WSAEINVAL;
+  if ALastError then FLastError:=WSAEINVAL;
   if ASockAddr = nil then Exit;
 
   {$IFDEF WINSOCK2_DEBUG}
@@ -3000,7 +3027,7 @@ begin
   FreeMem(ASockAddr);
   ASockAddr:=nil;
   ALength:=0;
-  FLastError:=ERROR_SUCCESS;
+  if ALastError then FLastError:=ERROR_SUCCESS;
   Result:=True;
  except
   {}
@@ -3047,7 +3074,7 @@ begin
       if InAddr.S_addr = INADDR_NONE then
        begin
         FLastError:=WSAEINVAL;
-        ReleaseAddress(Result,ALength);
+        ReleaseAddress(Result,ALength,False);
         
         {$IFDEF WINSOCK2_DEBUG}
         if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket:  inet_addr returned: = INADDR_NONE');
@@ -3058,7 +3085,7 @@ begin
       if (InAddr.S_addr = INADDR_ANY) and (FBoundAddress <> INET_ADDRSTR_ANY) then
        begin
         FLastError:=WSAEINVAL;
-        ReleaseAddress(Result,ALength);
+        ReleaseAddress(Result,ALength,False);
 
         {$IFDEF WINSOCK2_DEBUG}
         if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket:  inet_addr returned: = INADDR_ANY');
@@ -3080,7 +3107,7 @@ begin
       if Winsock2.InetPtonA(AF_INET6,PChar(FBoundAddress),@SockAddr.sin6_addr) = SOCKET_ERROR then
        begin
         FLastError:=Winsock2.WSAGetLastError;
-        ReleaseAddress(Result,ALength);
+        ReleaseAddress(Result,ALength,False);
 
         {$IFDEF WINSOCK2_DEBUG}
         if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket:  InetPtonA returned: ' + Winsock2ErrorToString(FLastError));
@@ -3093,7 +3120,7 @@ begin
       if Winsock2.WSAStringToAddressA(PChar(FBoundAddress),FFamily,nil,PSockAddrIn(@SockAddr)^,BufferLength) = SOCKET_ERROR then
        begin
         FLastError:=Winsock2.WSAGetLastError;
-        ReleaseAddress(Result,ALength);
+        ReleaseAddress(Result,ALength,False);
         Exit;
        end;}
        
@@ -3138,6 +3165,7 @@ end;
 
 function TWinsock2Socket.Bind:LongInt;
 var
+ WorkBool:LongBool;
  SockAddr:PSockAddr;
  SockAddrLength:Integer;
 begin
@@ -3149,7 +3177,88 @@ begin
  {$IFDEF WINSOCK2_DEBUG}
  if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket: Bind');
  {$ENDIF}
- 
+
+ {Set Options}
+ if ReuseAddress then
+  begin
+   WorkBool:=ReuseAddress;
+   if Winsock2.setsockopt(Handle,SOL_SOCKET,SO_REUSEADDR,PChar(@WorkBool),SizeOf(WorkBool)) = SOCKET_ERROR then
+    begin
+     FLastError:=Winsock2.WSAGetLastError;
+      
+     {$IFDEF WINSOCK2_DEBUG}
+     if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket:  setsockopt returned: = ' + Winsock2ErrorToString(FLastError));
+     {$ENDIF}
+
+     Exit;
+    end;
+  end;
+ if FSendSize <> 0 then
+  begin
+   if Winsock2.setsockopt(Handle,SOL_SOCKET,SO_SNDBUF,PChar(@FSendSize),SizeOf(FSendSize)) = SOCKET_ERROR then
+    begin
+     FLastError:=Winsock2.WSAGetLastError;
+   
+     {$IFDEF WINSOCK2_DEBUG}
+     if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket:  setsockopt returned: = ' + Winsock2ErrorToString(FLastError));
+     {$ENDIF}
+
+     Exit;
+    end;
+  end;
+ if FReceiveSize <> 0 then
+  begin
+   if Winsock2.setsockopt(Handle,SOL_SOCKET,SO_RCVBUF,PChar(@FReceiveSize),SizeOf(FReceiveSize)) = SOCKET_ERROR then
+    begin
+     FLastError:=Winsock2.WSAGetLastError;
+
+     {$IFDEF WINSOCK2_DEBUG}
+     if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket:  setsockopt returned: = ' + Winsock2ErrorToString(FLastError));
+     {$ENDIF}
+
+     Exit;
+    end;
+  end;
+ if FSendTimeout <> 0 then
+  begin
+   if Winsock2.setsockopt(Handle,SOL_SOCKET,SO_SNDTIMEO,PChar(@FSendTimeout),SizeOf(FSendTimeout)) = SOCKET_ERROR then
+    begin
+     FLastError:=Winsock2.WSAGetLastError;
+
+     {$IFDEF WINSOCK2_DEBUG}
+     if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket:  setsockopt returned: = ' + Winsock2ErrorToString(FLastError));
+     {$ENDIF}
+
+     Exit;
+    end;
+  end;
+ if FReceiveTimeout <> 0 then
+  begin
+   if Winsock2.setsockopt(Handle,SOL_SOCKET,SO_RCVTIMEO,PChar(@FReceiveTimeout),SizeOf(FReceiveTimeout)) = SOCKET_ERROR then
+    begin
+     FLastError:=Winsock2.WSAGetLastError;
+
+     {$IFDEF WINSOCK2_DEBUG}
+     if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket:  setsockopt returned: = ' + Winsock2ErrorToString(FLastError));
+     {$ENDIF}
+
+     Exit;
+    end;
+  end;
+ if FConnectTimeout <> 0 then
+  begin
+   if Winsock2.setsockopt(Handle,SOL_SOCKET,SO_CONNTIMEO,PChar(@FConnectTimeout),SizeOf(FConnectTimeout)) = SOCKET_ERROR then
+    begin
+     FLastError:=Winsock2.WSAGetLastError;
+
+     {$IFDEF WINSOCK2_DEBUG}
+     if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket:  setsockopt returned: = ' + Winsock2ErrorToString(FLastError));
+     {$ENDIF}
+
+     Exit;
+    end;
+  end;
+
  SockAddrLength:=0;
  SockAddr:=AllocateBoundAddress(SockAddrLength);
  if SockAddr = nil then Exit;
@@ -3165,7 +3274,7 @@ begin
     {$ENDIF}
    end;
  finally
-  ReleaseAddress(SockAddr,SockAddrLength);
+  ReleaseAddress(SockAddr,SockAddrLength,FLastError = ERROR_SUCCESS);
  end;
 end;
 
@@ -3493,7 +3602,7 @@ begin
       end;
     end;
    finally
-    ReleaseAddress(SockAddr,SockAddrLength);
+    ReleaseAddress(SockAddr,SockAddrLength,FLastError = ERROR_SUCCESS);
    end;
   end
  else
@@ -3608,7 +3717,7 @@ begin
     {$ENDIF}
    end;
  finally
-  ReleaseAddress(SockAddr,SockAddrLength);
+  ReleaseAddress(SockAddr,SockAddrLength,FLastError = ERROR_SUCCESS);
  end; 
 end;
 
@@ -3640,7 +3749,7 @@ begin
   if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 Socket:  Result = ' + AddressFamilyToString(Result));
   {$ENDIF}
  finally
-  ReleaseAddress(SockAddr,SockAddrLength);
+  ReleaseAddress(SockAddr,SockAddrLength,FLastError = ERROR_SUCCESS);
  end; 
 end;
 
@@ -3692,7 +3801,7 @@ begin
       end;
     end;
    finally
-    ReleaseAddress(SockAddr,SockAddrLength);
+    ReleaseAddress(SockAddr,SockAddrLength,FLastError = ERROR_SUCCESS);
    end;
   end
  else
@@ -4611,6 +4720,7 @@ end;
 function TWinsock2RAWSocket.RecvFromSocketEx(AHandle:THandle;ASockAddr:PSockAddr;ASockLen:PInteger;AData:Pointer;ASize:Integer;var ACount:Integer;var AClosed:Boolean):LongInt;
 var
  Count:Integer;
+ OldError:LongInt;
 begin
  {}
  ACount:=0;
@@ -4635,8 +4745,10 @@ begin
     
    if Count = SOCKET_ERROR then
     begin
-     FLastError:=Winsock2.WSAGetLastError;
+     OldError:=Winsock2.WSAGetLastError;
      Disconnect;
+
+     FLastError:=OldError;
      Exit;
     end
    else
@@ -4807,7 +4919,7 @@ begin
   FLastError:=ERROR_SUCCESS;
   Result:=Count;
  finally
-  ReleaseAddress(SockAddr,SockAddrLength);
+  ReleaseAddress(SockAddr,SockAddrLength,FLastError = ERROR_SUCCESS);
  end;
 end;
 
@@ -4845,7 +4957,7 @@ begin
   FLastError:=ERROR_SUCCESS;
   Result:=Count;
  finally
-  ReleaseAddress(SockAddr,SockAddrLength);
+  ReleaseAddress(SockAddr,SockAddrLength,FLastError = ERROR_SUCCESS);
  end; 
 end;
 
@@ -4881,7 +4993,7 @@ begin
  
  FUseNagle:=True;
  FUseKeepalive:=False;
- FSegmentSize:=8192;
+ FSegmentSize:=0;
  FMaxSegmentSize:=0;
 end;
 
@@ -5028,6 +5140,37 @@ end;
 
 {==============================================================================}
 
+function TWinsock2TCPSocket.GetMaxSegmentSize:LongWord;
+var
+ Size:Integer;
+begin
+ {}
+ Result:=0;
+ FLastError:=WSANOTINITIALISED;
+ if WS2StartupError <> ERROR_SUCCESS then Exit;
+
+ {$IFDEF WINSOCK2_DEBUG}
+ if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 TCP Socket: GetMaxSegmentSize');
+ {$ENDIF}
+
+ FLastError:=ERROR_SUCCESS;
+ Result:=FMaxSegmentSize;
+
+ if not Connected then Exit;
+
+ Size:=SizeOf(Integer);
+ if Winsock2.getsockopt(Handle,IPPROTO_TCP,TCP_MAXSEG,PChar(@Result),Size) = ERROR_SUCCESS then Exit;
+
+ FLastError:=Winsock2.WSAGetLastError;
+
+ {$IFDEF WINSOCK2_DEBUG}
+ if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 TCP Socket:  getsockopt returned: = ' + Winsock2ErrorToString(FLastError));
+ {$ENDIF}
+end;
+
+
+{==============================================================================}
+
 procedure TWinsock2TCPSocket.SetMaxSegmentSize(AMaxSegmentSize:LongWord);
 begin
  {}
@@ -5056,6 +5199,7 @@ end;
 
 function TWinsock2TCPSocket.Listen(ABacklog:Integer):LongInt;
 var
+ WorkInt:Integer;
  WorkBool:LongBool;
 begin
  {}
@@ -5096,9 +5240,9 @@ begin
      Exit;
     end;
   end;
- if MaxSegmentSize <> 0 then
+ if FMaxSegmentSize <> 0 then
   begin
-   if Winsock2.setsockopt(Handle,IPPROTO_TCP,TCP_MAXSEG,PChar(@MaxSegmentSize),SizeOf(MaxSegmentSize)) = SOCKET_ERROR then
+   if Winsock2.setsockopt(Handle,IPPROTO_TCP,TCP_MAXSEG,PChar(@FMaxSegmentSize),SizeOf(FMaxSegmentSize)) = SOCKET_ERROR then
     begin
      FLastError:=Winsock2.WSAGetLastError;
       
@@ -5109,7 +5253,31 @@ begin
      Exit;
     end;
   end;
- 
+
+ {Set Segment Size}
+ if SegmentSize = 0 then
+  begin
+   {Default to TCP Buffer Size}
+   SegmentSize:=TCP_BUFFER_SIZE;
+
+   {Check Send Size}
+   WorkInt:=SendSize;
+   if (WorkInt > SegmentSize) then
+    begin
+     SegmentSize:=WorkInt;
+    end;
+
+   {Check Receive Size}
+   WorkInt:=ReceiveSize;
+   if (WorkInt > SegmentSize) then
+    begin
+     SegmentSize:=WorkInt;
+    end;
+
+   {Round to Max Segment Size}
+   SegmentSize:=SegmentSize - (SegmentSize mod MaxSegmentSize);
+  end;
+
  {Set Backlog}
  FBacklog:=ABacklog;
  FLastError:=ERROR_SUCCESS;
@@ -5158,6 +5326,7 @@ var
  Offset:Integer;
  StartTime:Int64;
  CurrentTime:Int64;
+ OldError:LongInt;
 begin
  {}
  ACount:=0;
@@ -5177,8 +5346,10 @@ begin
     Count:=Winsock2.recv(Handle,Pointer(PtrUInt(AData) + PtrUInt(Offset))^,ASize - Offset,0);
     if Count = SOCKET_ERROR then
      begin
-      FLastError:=Winsock2.WSAGetLastError;
+      OldError:=Winsock2.WSAGetLastError;
       Disconnect;
+
+      FLastError:=OldError;
       Exit;
      end
     else
@@ -5494,6 +5665,7 @@ end;
 function TWinsock2UDPSocket.RecvFromSocketEx(AHandle:THandle;ASockAddr:PSockAddr;ASockLen:PInteger;AData:Pointer;ASize:Integer;var ACount:Integer;var AClosed:Boolean):LongInt;
 var
  Count:Integer;
+ OldError:LongInt;
 begin
  {}
  ACount:=0;
@@ -5518,8 +5690,10 @@ begin
     
    if Count = SOCKET_ERROR then
     begin
-     FLastError:=Winsock2.WSAGetLastError;
+     OldError:=Winsock2.WSAGetLastError;
      Disconnect;
+
+     FLastError:=OldError;
      Exit;
     end
    else
@@ -5692,7 +5866,7 @@ begin
   FLastError:=ERROR_SUCCESS;
   Result:=Count;
  finally
-  ReleaseAddress(SockAddr,SockAddrLength);
+  ReleaseAddress(SockAddr,SockAddrLength,FLastError = ERROR_SUCCESS);
  end;
 end;
 
@@ -5734,7 +5908,7 @@ begin
   FLastError:=ERROR_SUCCESS;
   Result:=Count;
  finally
-  ReleaseAddress(SockAddr,SockAddrLength);
+  ReleaseAddress(SockAddr,SockAddrLength,FLastError = ERROR_SUCCESS);
  end; 
 end;
 
@@ -6104,7 +6278,7 @@ begin
     if (InAddr.S_addr = INADDR_NONE) and (FRemoteAddress <> INET_ADDRSTR_BROADCAST) then
      begin
       FLastError:=WSAEINVAL;
-      ReleaseAddress(Result,ALength);
+      ReleaseAddress(Result,ALength,False);
 
       {$IFDEF WINSOCK2_DEBUG}
       if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 RAW Client:  inet_addr returned: = INADDR_NONE');
@@ -6115,7 +6289,7 @@ begin
     if InAddr.S_addr = INADDR_ANY then
      begin
       FLastError:=WSAEINVAL;
-      ReleaseAddress(Result,ALength);
+      ReleaseAddress(Result,ALength,False);
 
       {$IFDEF WINSOCK2_DEBUG}
       if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 RAW Client:  inet_addr returned: = INADDR_ANY');
@@ -6134,7 +6308,7 @@ begin
     if Winsock2.InetPtonA(AF_INET6,PChar(FRemoteAddress),@SockAddr.sin6_addr) = SOCKET_ERROR then
      begin
       FLastError:=Winsock2.WSAGetLastError;
-      ReleaseAddress(Result,ALength);
+      ReleaseAddress(Result,ALength,False);
  
       {$IFDEF WINSOCK2_DEBUG}
       if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 RAW Client:  InetPtonA returned: ' + Winsock2ErrorToString(FLastError));
@@ -6147,7 +6321,7 @@ begin
     if Winsock2.WSAStringToAddressA(PChar(FRemoteAddress),FFamily,nil,PSockAddrIn(@SockAddr)^,BufferLength) = SOCKET_ERROR then
      begin
       FLastError:=Winsock2.WSAGetLastError;
-      ReleaseAddress(Result,ALength);
+      ReleaseAddress(Result,ALength,False);
       Exit;
      end;}
      
@@ -6246,7 +6420,7 @@ begin
       end;
      Result:=True;
     finally
-     ReleaseAddress(SockAddr,SockAddrLength);
+     ReleaseAddress(SockAddr,SockAddrLength,FLastError = ERROR_SUCCESS);
     end;
    end
   else
@@ -6617,7 +6791,7 @@ begin
     if InAddr.S_addr = INADDR_NONE then
      begin
       FLastError:=WSAEINVAL;
-      ReleaseAddress(Result,ALength);
+      ReleaseAddress(Result,ALength,False);
       
       {$IFDEF WINSOCK2_DEBUG}
       if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 TCP Client:  inet_addr returned: = INADDR_NONE');
@@ -6628,7 +6802,7 @@ begin
     if InAddr.S_addr = INADDR_ANY then
      begin
       FLastError:=WSAEINVAL;
-      ReleaseAddress(Result,ALength);
+      ReleaseAddress(Result,ALength,False);
       
       {$IFDEF WINSOCK2_DEBUG}
       if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 TCP Client:  inet_addr returned: = INADDR_ANY');
@@ -6647,7 +6821,7 @@ begin
     if Winsock2.InetPtonA(AF_INET6,PChar(FRemoteAddress),@SockAddr.sin6_addr) = SOCKET_ERROR then
      begin
       FLastError:=Winsock2.WSAGetLastError;
-      ReleaseAddress(Result,ALength);
+      ReleaseAddress(Result,ALength,False);
       
       {$IFDEF WINSOCK2_DEBUG}
       if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 TCP Client:  InetPtonA returned: ' + Winsock2ErrorToString(FLastError));
@@ -6660,7 +6834,7 @@ begin
     if Winsock2.WSAStringToAddressA(PChar(FRemoteAddress),FFamily,nil,PSockAddrIn(@SockAddr)^,BufferLength) = SOCKET_ERROR then
      begin
       FLastError:=Winsock2.WSAGetLastError;
-      ReleaseAddress(Result,ALength);
+      ReleaseAddress(Result,ALength,False);
       Exit;
      end;}
      
@@ -6749,9 +6923,9 @@ begin
       Exit;
      end;
    end;
-  if MaxSegmentSize <> 0 then
+  if FMaxSegmentSize <> 0 then
    begin
-    if Winsock2.setsockopt(Handle,IPPROTO_TCP,TCP_MAXSEG,PChar(@MaxSegmentSize),SizeOf(MaxSegmentSize)) = SOCKET_ERROR then
+    if Winsock2.setsockopt(Handle,IPPROTO_TCP,TCP_MAXSEG,PChar(@FMaxSegmentSize),SizeOf(FMaxSegmentSize)) = SOCKET_ERROR then
      begin
       FLastError:=Winsock2.WSAGetLastError;
       
@@ -6765,7 +6939,31 @@ begin
    
   {Bind Socket}
   if Bind = SOCKET_ERROR then Exit;
-  
+
+  {Set Segment Size}
+  if SegmentSize = 0 then
+   begin
+    {Default to TCP Buffer Size}
+    SegmentSize:=TCP_BUFFER_SIZE;
+
+    {Check Send Size}
+    WorkInt:=SendSize;
+    if (WorkInt > SegmentSize) then
+     begin
+      SegmentSize:=WorkInt;
+     end;
+
+    {Check Receive Size}
+    WorkInt:=ReceiveSize;
+    if (WorkInt > SegmentSize) then
+     begin
+      SegmentSize:=WorkInt;
+     end;
+
+    {Round to Max Segment Size}
+    SegmentSize:=SegmentSize - (SegmentSize mod MaxSegmentSize);
+   end;
+
   {Connect Socket}
   SockAddrLength:=0;
   SockAddr:=AllocateRemoteAddress(SockAddrLength);
@@ -6784,7 +6982,7 @@ begin
     end;
    Result:=True;
   finally
-   ReleaseAddress(SockAddr,SockAddrLength);
+   ReleaseAddress(SockAddr,SockAddrLength,FLastError = ERROR_SUCCESS);
   end;
  finally
   if not(Result) then Disconnect;
@@ -7237,7 +7435,7 @@ begin
     if (InAddr.S_addr = INADDR_NONE) and (FRemoteAddress <> INET_ADDRSTR_BROADCAST) then
      begin
       FLastError:=WSAEINVAL;
-      ReleaseAddress(Result,ALength);
+      ReleaseAddress(Result,ALength,False);
       
       {$IFDEF WINSOCK2_DEBUG}
       if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 UDP Client:  inet_addr returned: = INADDR_NONE');
@@ -7248,7 +7446,7 @@ begin
     if InAddr.S_addr = INADDR_ANY then
      begin
       FLastError:=WSAEINVAL;
-      ReleaseAddress(Result,ALength);
+      ReleaseAddress(Result,ALength,False);
       
       {$IFDEF WINSOCK2_DEBUG}
       if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 UDP Client:  inet_addr returned: = INADDR_ANY');
@@ -7267,7 +7465,7 @@ begin
     if Winsock2.InetPtonA(AF_INET6,PChar(FRemoteAddress),@SockAddr.sin6_addr) = SOCKET_ERROR then
      begin
       FLastError:=Winsock2.WSAGetLastError;
-      ReleaseAddress(Result,ALength);
+      ReleaseAddress(Result,ALength,False);
       
       {$IFDEF WINSOCK2_DEBUG}
       if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 UDP Client:  InetPtonA returned: ' + Winsock2ErrorToString(FLastError));
@@ -7280,7 +7478,7 @@ begin
     if Winsock2.WSAStringToAddressA(PChar(FRemoteAddress),FFamily,nil,PSockAddrIn(@SockAddr)^,BufferLength) = SOCKET_ERROR then
      begin
       FLastError:=Winsock2.WSAGetLastError;
-      ReleaseAddress(Result,ALength);
+      ReleaseAddress(Result,ALength,False);
       Exit;
      end;}
      
@@ -7379,7 +7577,7 @@ begin
       end;
      Result:=True;
     finally
-     ReleaseAddress(SockAddr,SockAddrLength);
+     ReleaseAddress(SockAddr,SockAddrLength,FLastError = ERROR_SUCCESS);
     end;
    end
   else
@@ -7755,6 +7953,7 @@ end;
 
 procedure TWinsock2TCPListener.DoConnect(AThread:TWinsock2TCPServerThread);
 var
+ WorkInt:Integer;
  WorkBool:LongBool;
 begin
  {}
@@ -7777,34 +7976,58 @@ begin
      Exit;
     end;
   end;
-  if UseKeepalive then
-   begin
-    WorkBool:=UseKeepalive;
-    if Winsock2.setsockopt(AThread.Server.Handle,SOL_SOCKET,SO_KEEPALIVE,PChar(@WorkBool),SizeOf(WorkBool)) = SOCKET_ERROR then
-     begin
-      FLastError:=Winsock2.WSAGetLastError;
+ if UseKeepalive then
+  begin
+   WorkBool:=UseKeepalive;
+   if Winsock2.setsockopt(AThread.Server.Handle,SOL_SOCKET,SO_KEEPALIVE,PChar(@WorkBool),SizeOf(WorkBool)) = SOCKET_ERROR then
+    begin
+     FLastError:=Winsock2.WSAGetLastError;
       
-      {$IFDEF WINSOCK2_DEBUG}
-      if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 TCP Listener:  setsockopt returned: = ' + Winsock2ErrorToString(FLastError));
-      {$ENDIF}
+     {$IFDEF WINSOCK2_DEBUG}
+     if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 TCP Listener:  setsockopt returned: = ' + Winsock2ErrorToString(FLastError));
+     {$ENDIF}
       
-      Exit;
-     end;
-   end;
-  if MaxSegmentSize <> 0 then
-   begin
-    if Winsock2.setsockopt(AThread.Server.Handle,IPPROTO_TCP,TCP_MAXSEG,PChar(@MaxSegmentSize),SizeOf(MaxSegmentSize)) = SOCKET_ERROR then
-     begin
-      FLastError:=Winsock2.WSAGetLastError;
+     Exit;
+    end;
+  end;
+ (*if FMaxSegmentSize <> 0 then
+  begin
+   if Winsock2.setsockopt(AThread.Server.Handle,IPPROTO_TCP,TCP_MAXSEG,PChar(@FMaxSegmentSize),SizeOf(FMaxSegmentSize)) = SOCKET_ERROR then
+    begin
+     FLastError:=Winsock2.WSAGetLastError;
       
-      {$IFDEF WINSOCK2_DEBUG}
-      if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 TCP Listener:  setsockopt returned: = ' + Winsock2ErrorToString(FLastError));
-      {$ENDIF}
+     {$IFDEF WINSOCK2_DEBUG}
+     if NETWORK_LOG_ENABLED then NetworkLogDebug(nil,'Winsock2 TCP Listener:  setsockopt returned: = ' + Winsock2ErrorToString(FLastError));
+     {$ENDIF}
       
-      Exit;
-     end;
-   end;
- 
+     Exit;
+    end;
+  end;*){Handshake already completed, cannot set MSS}
+
+ {Set Segment Size}
+ if AThread.Server.SegmentSize = 0 then
+  begin
+   {Default to TCP Buffer Size}
+   AThread.Server.SegmentSize:=TCP_BUFFER_SIZE;
+
+   {Check Send Size}
+   WorkInt:=AThread.Server.SendSize;
+   if (WorkInt > AThread.Server.SegmentSize) then
+    begin
+     AThread.Server.SegmentSize:=WorkInt;
+    end;
+
+   {Check Receive Size}
+   WorkInt:=AThread.Server.ReceiveSize;
+   if (WorkInt > AThread.Server.SegmentSize) then
+    begin
+     AThread.Server.SegmentSize:=WorkInt;
+    end;
+
+   {Round to Max Segment Size}
+   AThread.Server.SegmentSize:=AThread.Server.SegmentSize - (AThread.Server.SegmentSize mod AThread.Server.MaxSegmentSize);
+  end;
+
  if Assigned(FOnConnect) then FOnConnect(AThread);
 end;
 
@@ -7850,6 +8073,7 @@ begin
  
  if FListener <> nil then
   begin
+   ReuseAddress:=AListener.ReuseAddress;
    Family:=AListener.Family;
    SocketType:=AListener.SocketType;
    Protocol:=AListener.Protocol;

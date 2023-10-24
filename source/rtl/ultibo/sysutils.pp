@@ -1,6 +1,6 @@
 {
     This file is part of the Free Pascal run time library.
-    Copyright (c) 2004 by the Free Pascal development team
+    Copyright (c) 2023 by the Free Pascal development team
 
     Sysutils unit for Ultibo target.
 
@@ -15,8 +15,15 @@
 
 {$MODE objfpc}
 {$MODESWITCH OUT}
+{$IFDEF UNICODERTL}
+{$MODESWITCH UNICODESTRINGS}
+{$ELSE}
 {$H+}
+{$ENDIF}
+
+{$IFNDEF FPC_DOTTEDUNITS}
 unit sysutils;
+{$ENDIF FPC_DOTTEDUNITS}
 
 interface
 
@@ -26,6 +33,7 @@ interface
 {$DEFINE HAS_GETTICKCOUNT}
 {$DEFINE HAS_GETTICKCOUNT64}
 {$DEFINE HAS_LOCALTIMEZONEOFFSET}
+{$DEFINE HAS_FILEGETDATETIMEINFO}
 {$modeswitch typehelpers}
 {$modeswitch advancedrecords}
 
@@ -59,6 +67,7 @@ type
    cFileName:array[0..({System.}MaxPathLen) - 1] of AnsiCHAR;
    cAlternateFileName:array[0..13] of AnsiCHAR;
   end;
+  TWin32FindData = TWin32FindDataA;
 
 type
   {System Time (Equivalent to Win32 with FPC compatability}
@@ -104,7 +113,10 @@ type
  TSysUtilsFileSeek = function(Handle:THandle;FOffset,Origin:LongInt):LongInt;
  TSysUtilsFileTruncate = function(Handle:THandle;Size:Int64):Boolean;
  TSysUtilsFileAge = function(const FileName:RawByteString):LongInt;
- TSysUtilsFileExists = function(const FileName:RawByteString):Boolean;
+ {$ifndef FPC_LEGACY}
+ TSysUtilsFileGetSymLinkTarget = function(const FileName:RawByteString;out SymLinkRec:TRawbyteSymLinkRec):Boolean;
+ {$endif}
+ TSysUtilsFileExists = function(const FileName:RawByteString;FollowLink:Boolean):Boolean;
  TSysUtilsFileGetAttr = function(const FileName:RawByteString):LongInt;
  TSysUtilsFileGetDate = function(Handle:THandle):LongInt;
  TSysUtilsFileSetAttr = function(const FileName:RawByteString;Attr:LongInt):LongInt;
@@ -119,7 +131,7 @@ type
  {Disk Functions}
  TSysUtilsDiskFree = function(Drive:Byte):Int64;
  TSysUtilsDiskSize = function(Drive:Byte):Int64;
- TSysUtilsDirectoryExists = function(const Directory:RawByteString):Boolean;
+ TSysUtilsDirectoryExists = function(const Directory:RawByteString;FollowLink:Boolean):Boolean;
  {Thread Functions}
  TSysUtilsSleep = function(Milliseconds:LongWord):LongWord;
  {Tick Functions}
@@ -130,8 +142,13 @@ type
  {Locale Functions}
  TSysUtilsGetLocalTime = procedure(var SystemTime:TSystemTime);
  TSysUtilsSetLocalTime = procedure(const SystemTime:TSystemTime);
+ TSysUtilsGetUniversalTime = function(var SystemTime:TSystemTime):Boolean;
  TSysUtilsGetLocalTimeOffset = function:Integer;
+ TSysUtilsGetLocalTimeOffsetEx = function(const DateTime:TDateTime;const InputIsUTC:Boolean;out Offset:Integer):Boolean;
  TSysUtilsSysErrorMessage = function(ErrorCode:Integer):String;
+ {FileTime Functions}
+ TSysUtilsFileTimeToSystemTime = function(const lpFileTime:FILETIME;var lpSystemTime:SYSTEMTIME):ByteBool;
+ TSysUtilsFileTimeToLocalFileTime = function(const lpFileTime:FILETIME;var lpLocalFileTime:FILETIME):ByteBool;
  
 var
  {File Functions}
@@ -143,6 +160,9 @@ var
  SysUtilsFileSeekHandler:TSysUtilsFileSeek;
  SysUtilsFileTruncateHandler:TSysUtilsFileTruncate;
  SysUtilsFileAgeHandler:TSysUtilsFileAge;
+ {$ifndef FPC_LEGACY}
+ SysUtilsFileGetSymLinkTargetHandler:TSysUtilsFileGetSymLinkTarget;
+ {$endif}
  SysUtilsFileExistsHandler:TSysUtilsFileExists;
  SysUtilsFileGetAttrHandler:TSysUtilsFileGetAttr;
  SysUtilsFileGetDateHandler:TSysUtilsFileGetDate;
@@ -169,15 +189,53 @@ var
  {Locale Functions}
  SysUtilsGetLocalTimeHandler:TSysUtilsGetLocalTime;
  SysUtilsSetLocalTimeHandler:TSysUtilsSetLocalTime;
+ SysUtilsGetUniversalTimeHandler:TSysUtilsGetUniversalTime;
  SysUtilsGetLocalTimeOffsetHandler:TSysUtilsGetLocalTimeOffset;
+ SysUtilsGetLocalTimeOffsetExHandler:TSysUtilsGetLocalTimeOffsetEx;
  SysUtilsSysErrorMessageHandler:TSysUtilsSysErrorMessage;
+ {FileTime Functions}
+ SysUtilsFileTimeToSystemTimeHandler:TSysUtilsFileTimeToSystemTime;
+ SysUtilsFileTimeToLocalFileTimeHandler:TSysUtilsFileTimeToLocalFileTime;
  
  procedure SysUtilsInitExceptions;
  
 implementation
 
+{$IFDEF FPC_DOTTEDUNITS}
+uses
+  System.SysConst;
+{$ELSE FPC_DOTTEDUNITS}
 uses
   sysconst;
+{$ENDIF FPC_DOTTEDUNITS}
+
+{****************************************************************************
+                              Time Functions
+****************************************************************************}
+
+function FileTimeToSystemTime(const lpFileTime:FILETIME;var lpSystemTime:SYSTEMTIME):ByteBool;
+begin
+ if Assigned(SysUtilsFileTimeToSystemTimeHandler) then
+  begin
+   Result:=SysUtilsFileTimeToSystemTimeHandler(lpFileTime,lpSystemTime);
+  end
+ else
+  begin
+   Result:=False;
+  end;
+end;
+
+function FileTimeToLocalFileTime(const lpFileTime:FILETIME;var lpLocalFileTime:FILETIME):ByteBool;
+begin
+ if Assigned(SysUtilsFileTimeToLocalFileTimeHandler) then
+  begin
+   Result:=SysUtilsFileTimeToLocalFileTimeHandler(lpFileTime,lpLocalFileTime);
+  end
+ else
+  begin
+   Result:=False;
+  end;
+end;
 
   { Include platform independent implementation part }
   {$i sysutils.inc}
@@ -201,7 +259,7 @@ begin
   end; 
 end;
 
-function FileGetDate(Handle: THandle) : LongInt;
+function FileGetDate(Handle: THandle) : TOSTimestamp;
 begin
  if Assigned(SysUtilsFileGetDateHandler) then
   begin
@@ -213,7 +271,7 @@ begin
   end;
 end;
 
-function FileSetDate(Handle : THandle;Age : Longint) : Longint;
+function FileSetDate(Handle : THandle;Age : TOSTimestamp) : Longint;
 begin
  if Assigned(SysUtilsFileSetDateHandler) then
   begin
@@ -353,7 +411,7 @@ begin
   end;
 end;
 
-Function FileAge (Const FileName : RawByteString): Longint;
+Function FileAge (Const FileName : RawByteString): TOSTimestamp;
 begin
  if Assigned(SysUtilsFileAgeHandler) then
   begin
@@ -365,11 +423,25 @@ begin
   end;
 end;
 
-Function FileExists (Const FileName : RawByteString) : Boolean;
+{$ifndef FPC_LEGACY}
+function FileGetSymLinkTarget (const FileName: RawByteString; out SymLinkRec: TRawbyteSymLinkRec): Boolean;
+begin
+ if Assigned(SysUtilsFileGetSymLinkTargetHandler) then
+  begin
+   Result:=SysUtilsFileGetSymLinkTargetHandler(FileName,SymLinkRec);
+  end
+ else
+  begin
+   Result:=False;
+  end;
+end;
+{$endif}
+
+Function FileExists (Const FileName : RawByteString{$ifndef FPC_LEGACY}; FollowLink : Boolean = True{$endif}) : Boolean;
 Begin
  if Assigned(SysUtilsFileExistsHandler) then
   begin
-   Result:=SysUtilsFileExistsHandler(FileName);
+   Result:=SysUtilsFileExistsHandler(FileName,{$ifdef FPC_LEGACY}True{$else}FollowLink{$endif});
   end
  else
   begin
@@ -427,7 +499,11 @@ begin
   end; 
 end;
 
+{$ifdef FPC_LEGACY}
 Procedure InternalFindClose(var Handle: THandle{$ifdef USEFINDDATA};var FindData: TFindData{$endif});
+{$else}
+Procedure InternalFindClose(var Handle: THandle{$ifdef SEARCHREC_USEFINDDATA};var FindData: TFindData{$endif});
+{$endif}
 begin 
  if Assigned(SysUtilsInternalFindCloseHandler) then
   begin
@@ -458,6 +534,21 @@ begin
    Result:=-1;
   end;
 end;
+
+{$IF NOT DEFINED(FPC_STABLE) AND NOT DEFINED(FPC_FIXES) AND NOT DEFINED(FPC_LEGACY)}
+function FileGetDateTimeInfo(const FileName: string; out DateTime: TDateTimeInfoRec; FollowLink: Boolean = True): Boolean;
+var
+ Info:TSearchRec;
+begin
+ Result:=FindFirst(FileName,0,Info) = 0;
+ if Result then
+  begin
+   DateTime.data:=Info.FindData;
+   
+   FindClose(Info);
+  end;
+end;
+{$ENDIF}
 
 {****************************************************************************
                               Disk Functions
@@ -493,11 +584,11 @@ Begin
   end;
 End;
 
-function DirectoryExists(const Directory: RawByteString): Boolean;
+Function DirectoryExists (Const Directory : RawByteString{$ifndef FPC_LEGACY}; FollowLink: Boolean = True{$endif}) : Boolean;
 begin
  if Assigned(SysUtilsDirectoryExistsHandler) then
   begin
-   Result:=SysUtilsDirectoryExistsHandler(Directory);
+   Result:=SysUtilsDirectoryExistsHandler(Directory,{$ifdef FPC_LEGACY}True{$else}FollowLink{$endif});
   end
  else
   begin
@@ -549,6 +640,11 @@ end;
                               Misc Functions
 ****************************************************************************}
 
+procedure SysBeep;
+begin
+ {No SysBeep for Ultibo} 
+end;
+
 Function GetLastOSError : Integer;
 begin
   Result:=-1;
@@ -578,6 +674,16 @@ begin
   end;
 end;
 
+function GetUniversalTime(var SystemTime: TSystemTime): Boolean;
+begin
+  Result:=False;
+
+ if Assigned(SysUtilsGetUniversalTimeHandler) then
+  begin
+   Result:=SysUtilsGetUniversalTimeHandler(SystemTime);
+  end;
+end;
+
 function GetLocalTimeOffset: Integer;
 begin
  if Assigned(SysUtilsGetLocalTimeOffsetHandler) then
@@ -587,6 +693,18 @@ begin
  else
   begin
    Result:=0;
+  end;  
+end;
+
+function GetLocalTimeOffset(const DateTime: TDateTime; const InputIsUTC: Boolean; out Offset: Integer): Boolean;
+begin
+ if Assigned(SysUtilsGetLocalTimeOffsetExHandler) then
+  begin
+   Result:=SysUtilsGetLocalTimeOffsetExHandler(DateTime,InputIsUTC,Offset);
+  end
+ else
+  begin
+   Result:=False;
   end;  
 end;
 
@@ -609,22 +727,20 @@ end;
 
 Function GetEnvironmentVariable(Const EnvVar : String) : String;
 begin
- {}
  Result:=FPCGetEnvVarFromP(envp,EnvVar);
 end;
 
 Function GetEnvironmentVariableCount : Integer;
 begin
- {}
  Result:=FPCCountEnvVar(envp);
 end;
 
 Function GetEnvironmentString(Index : Integer) : {$ifdef FPC_RTL_UNICODE}UnicodeString{$else}AnsiString{$endif};
 begin
- {}
  Result:=FPCGetEnvStrFromP(envp,Index);
 end;
 
+{$ifdef FPC_LEGACY}
 function ExecuteProcess (const Path: AnsiString; const ComLine: AnsiString;Flags:TExecuteFlags=[]): integer;
 begin
  Result:=-1;
@@ -634,6 +750,27 @@ function ExecuteProcess (const Path: AnsiString; const ComLine: array of AnsiStr
 begin
  Result:=-1;
 end;
+{$else}
+function ExecuteProcess (const Path: RawByteString; const ComLine: RawByteString;Flags:TExecuteFlags=[]): integer;
+begin
+ Result:=-1;
+end;
+
+function ExecuteProcess (const Path: RawByteString; const ComLine: array of RawByteString;Flags:TExecuteFlags=[]): integer;
+begin
+ Result:=-1;
+end;
+
+function ExecuteProcess (const Path: UnicodeString; const ComLine: UnicodeString;Flags:TExecuteFlags=[]): integer;
+begin
+ Result:=-1;
+end;
+
+function ExecuteProcess (const Path: UnicodeString; const ComLine: array of UnicodeString;Flags:TExecuteFlags=[]): integer;
+begin
+ Result:=-1;
+end;
+{$endif}
 
 {****************************************************************************
                             Initialization functions
@@ -641,7 +778,6 @@ end;
 
 procedure SysUtilsInitExceptions;
 begin
- {}
  if SysUtilsExceptionsInitialized then Exit;
  
  InitExceptions;
@@ -655,6 +791,7 @@ end;
 
 Initialization
   SysUtilsInitExceptions;
+  OnBeep:=@SysBeep;
 Finalization
   DoneExceptions;
 end.

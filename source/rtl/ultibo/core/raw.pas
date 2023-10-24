@@ -1,7 +1,7 @@
 {
 Ultibo Raw Socket Protocol unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -509,7 +509,7 @@ begin
           end;
 
          {Check for Timeout}
-         if GetTickCount64 > (StartTime + ATimeout) then
+         if GetTickCount64 >= (StartTime + ATimeout) then
           begin
            {Return Error}
            Result:=SOCKET_ERROR;
@@ -1235,7 +1235,7 @@ begin
         end; 
 
        {Check for Timeout}
-       if GetTickCount64 > (StartTime + ASocket.SocketOptions.RecvTimeout) then
+       if GetTickCount64 >= (StartTime + ASocket.SocketOptions.RecvTimeout) then
         begin
          NetworkSetLastError(WSAETIMEDOUT);
          Exit;
@@ -1359,7 +1359,7 @@ begin
         end; 
 
        {Check for Timeout}
-       if GetTickCount64 > (StartTime + ASocket.SocketOptions.RecvTimeout) then
+       if GetTickCount64 >= (StartTime + ASocket.SocketOptions.RecvTimeout) then
         begin
          NetworkSetLastError(WSAETIMEDOUT);
          Exit;
@@ -2362,6 +2362,8 @@ begin
  FRecvData.Size:=RAW_BUFFER_SIZE;
 
  {Set Socket Defaults}
+ FSocketOptions.SendBuffer:=RAW_BUFFER_SIZE;
+ FSocketOptions.RecvBuffer:=RAW_BUFFER_SIZE;
  FSocketOptions.SendTimeout:=RAW_TIMEOUT;
  FSocketOptions.RecvTimeout:=RAW_TIMEOUT;
 end;

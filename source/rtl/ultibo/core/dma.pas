@@ -1,7 +1,7 @@
 {
 Ultibo DMA interface unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2022 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -269,8 +269,8 @@ function SysDMAReleaseBuffer(Buffer:Pointer):LongWord;
 
 {==============================================================================}
 {DMA Helper Functions}
-function DMAGetCount:LongWord; inline;
-function DMAHostGetDefault:PDMAHost; inline;
+function DMAGetCount:LongWord;
+function DMAHostGetDefault:PDMAHost;
 function DMAHostSetDefault(DMA:PDMAHost):LongWord; 
 
 function DMAHostCheck(DMA:PDMAHost):PDMAHost;
@@ -1024,8 +1024,8 @@ function DMABufferValidate(DMA:PDMAHost;Buffer:Pointer;Size:LongWord):LongWord;
 {Return: ERROR_SUCCESS on success or another error code on failure (ERROR_NOT_COMPATIBLE if not compatible with host)}
 
 {Note: Does not check for cache coherency requirements (Shared, Non Cached) only alignment and size.
-       Buffers used as the source of a DMA request do not neccessarily need to meet alignment and size
-       requirements, however buffers used as a destintation must meet these requirements or the caller
+       Buffers used as the source of a DMA request do not necessarily need to meet alignment and size
+       requirements, however buffers used as a destination must meet these requirements or the caller
        must take appropriate actions to prevent undesirable side effects from cache invalidation.}
 begin
  {}
@@ -1841,7 +1841,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {DMA Helper Functions}
-function DMAGetCount:LongWord; inline;
+function DMAGetCount:LongWord;
 {Get the current DMA host count}
 begin
  {}
@@ -1850,7 +1850,7 @@ end;
 
 {==============================================================================}
 
-function DMAHostGetDefault:PDMAHost; inline;
+function DMAHostGetDefault:PDMAHost;
 {Get the current default DMA host}
 begin
  {}

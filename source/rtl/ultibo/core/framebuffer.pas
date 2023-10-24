@@ -1,7 +1,7 @@
 {
 Ultibo Framebuffer interface unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -167,6 +167,7 @@ type
  
  TFramebufferDeviceGetOffset = function(Framebuffer:PFramebufferDevice;var X,Y:LongWord):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
  TFramebufferDeviceSetOffset = function(Framebuffer:PFramebufferDevice;X,Y:LongWord;Pan:Boolean):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
+ TFramebufferDeviceSetOffsetEx = function(Framebuffer:PFramebufferDevice;X,Y:LongWord;Pan,Switch:Boolean):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
  
  TFramebufferDeviceGetPalette = function(Framebuffer:PFramebufferDevice;Palette:PFramebufferPalette):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
  TFramebufferDeviceSetPalette = function(Framebuffer:PFramebufferDevice;Palette:PFramebufferPalette):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
@@ -202,13 +203,14 @@ type
   DeviceWaitSync:TFramebufferDeviceWaitSync;     {A device specific DeviceWaitSync method implementing a standard framebuffer device interface (Optional)}
   DeviceGetOffset:TFramebufferDeviceGetOffset;   {A device specific DeviceGetOffset method implementing a standard framebuffer device interface (Optional)}
   DeviceSetOffset:TFramebufferDeviceSetOffset;   {A device specific DeviceSetOffset method implementing a standard framebuffer device interface (Optional)}
-  DeviceGetPalette:TFramebufferDeviceGetPalette; {A device specific DeviceGetPalette method implementing a standard framebuffer device interface (Optional)}
-  DeviceSetPalette:TFramebufferDeviceSetPalette; {A device specific DeviceSetPalette method implementing a standard framebuffer device interface (Optional)}
+  DeviceSetOffsetEx:TFramebufferDeviceSetOffsetEx;     {A device specific DeviceSetOffsetEx method implementing a standard framebuffer device interface (Optional)}
+  DeviceGetPalette:TFramebufferDeviceGetPalette;       {A device specific DeviceGetPalette method implementing a standard framebuffer device interface (Optional)}
+  DeviceSetPalette:TFramebufferDeviceSetPalette;       {A device specific DeviceSetPalette method implementing a standard framebuffer device interface (Optional)}
   DeviceSetBacklight:TFramebufferDeviceSetBacklight;   {A device specific DeviceSetBacklight method implementing a standard framebuffer device interface (Optional)}
   DeviceSetCursor:TFramebufferDeviceSetCursor;         {A device specific DeviceSetCursor method implementing a standard framebuffer device interface (Or nil if the default method is suitable)}
   DeviceUpdateCursor:TFramebufferDeviceUpdateCursor;   {A device specific DeviceUpdateCursor method implementing a standard framebuffer device interface (Or nil if the default method is suitable)}
   DeviceGetProperties:TFramebufferDeviceGetProperties; {A device specific DeviceGetProperties method implementing a standard framebuffer device interface (Or nil if the default method is suitable)}
-  DeviceSetProperties:TFramebufferDeviceSetProperties; {A device specific DeviceSetProperties method implementing a standard framebuffer device interface (Mandatory)}
+  DeviceSetProperties:TFramebufferDeviceSetProperties; {A device specific DeviceSetProperties method implementing a standard framebuffer device interface (Or nil if the default method is suitable)}
   {Statistics Properties}
   AllocateCount:LongWord;
   ReleaseCount:LongWord;
@@ -297,7 +299,8 @@ function FramebufferDeviceGetPoint(Framebuffer:PFramebufferDevice;X,Y:LongWord):
 function FramebufferDeviceWaitSync(Framebuffer:PFramebufferDevice):LongWord;
  
 function FramebufferDeviceGetOffset(Framebuffer:PFramebufferDevice;var X,Y:LongWord):LongWord;
-function FramebufferDeviceSetOffset(Framebuffer:PFramebufferDevice;X,Y:LongWord;Pan:Boolean):LongWord;
+function FramebufferDeviceSetOffset(Framebuffer:PFramebufferDevice;X,Y:LongWord;Pan:Boolean):LongWord; inline;
+function FramebufferDeviceSetOffsetEx(Framebuffer:PFramebufferDevice;X,Y:LongWord;Pan,Switch:Boolean):LongWord;
 
 function FramebufferDeviceGetPalette(Framebuffer:PFramebufferDevice;Palette:PFramebufferPalette):LongWord;
 function FramebufferDeviceSetPalette(Framebuffer:PFramebufferDevice;Palette:PFramebufferPalette):LongWord;
@@ -334,8 +337,8 @@ function SysFramebufferAvailable:Boolean;
 
 {==============================================================================}
 {Framebuffer Helper Functions}
-function FramebufferDeviceGetCount:LongWord; inline;
-function FramebufferDeviceGetDefault:PFramebufferDevice; inline;
+function FramebufferDeviceGetCount:LongWord;
+function FramebufferDeviceGetDefault:PFramebufferDevice;
 function FramebufferDeviceSetDefault(Framebuffer:PFramebufferDevice):LongWord; 
 
 function FramebufferDeviceCheck(Framebuffer:PFramebufferDevice):PFramebufferDevice;
@@ -885,7 +888,7 @@ end;
 {==============================================================================}
 
 function FramebufferDeviceMark(Framebuffer:PFramebufferDevice;X,Y,Width,Height,Flags:LongWord):LongWord;
-{Mark a region written to the framebuffer and signal the device to take any neccessary actions}
+{Mark a region written to the framebuffer and signal the device to take any necessary actions}
 {Framebuffer: The framebuffer device to mark}
 {X: The starting column of the mark}
 {Y: The starting row of the mark}
@@ -926,7 +929,7 @@ end;
 {==============================================================================}
 
 function FramebufferDeviceCommit(Framebuffer:PFramebufferDevice;Address:PtrUInt;Size,Flags:LongWord):LongWord;
-{Commit a region written to the framebuffer and signal the device to take any neccessary actions}
+{Commit a region written to the framebuffer and signal the device to take any necessary actions}
 {Framebuffer: The framebuffer device to commit}
 {Address: The starting address of the commit}
 {Size: The size in bytes of the commit}
@@ -2068,12 +2071,32 @@ end;
 
 {==============================================================================}
 
-function FramebufferDeviceSetOffset(Framebuffer:PFramebufferDevice;X,Y:LongWord;Pan:Boolean):LongWord;
+function FramebufferDeviceSetOffset(Framebuffer:PFramebufferDevice;X,Y:LongWord;Pan:Boolean):LongWord; inline;
 {Set the virtual offset X and Y of a framebuffer device}
 {Framebuffer: The framebuffer device to set the offset for}
 {X: The X (Column) offset value in pixels to set}
 {Y: The Y (Row) offset value in pixels to set}
 {Pan: If True then pan the display without updating the Offset X and/or Y}
+{Return: ERROR_SUCCESS if completed or another error code on failure}
+
+{Note: X and Y are relative to the virtual buffer and NOT the physical screen (Where applicable)}
+{Note: Not all framebuffer devices support X and/or Y offset, returns ERROR_CALL_NOT_IMPLEMENTED if not supported}
+{      Devices that support offset X should set the flag FRAMEBUFFER_FLAG_OFFSETX}
+{      Devices that support offset Y should set the flag FRAMEBUFFER_FLAG_OFFSETY}
+begin
+ {}
+ Result:=FramebufferDeviceSetOffsetEx(Framebuffer,X,Y,Pan,True);
+end;
+
+{==============================================================================}
+
+function FramebufferDeviceSetOffsetEx(Framebuffer:PFramebufferDevice;X,Y:LongWord;Pan,Switch:Boolean):LongWord;
+{Set the virtual offset X and Y of a framebuffer device}
+{Framebuffer: The framebuffer device to set the offset for}
+{X: The X (Column) offset value in pixels to set}
+{Y: The Y (Row) offset value in pixels to set}
+{Pan: If True then pan the display without updating the Offset X and/or Y}
+{Switch: If False then update the Offset X and/or Y without moving the display}
 {Return: ERROR_SUCCESS if completed or another error code on failure}
 
 {Note: X and Y are relative to the virtual buffer and NOT the physical screen (Where applicable)}
@@ -2096,7 +2119,11 @@ begin
  Result:=ERROR_NOT_SUPPORTED;
  if Framebuffer.FramebufferState <> FRAMEBUFFER_STATE_ENABLED then Exit;
  
- if Assigned(Framebuffer.DeviceSetOffset) then
+ if Assigned(Framebuffer.DeviceSetOffsetEx) then
+  begin
+   Result:=Framebuffer.DeviceSetOffsetEx(Framebuffer,X,Y,Pan,Switch);
+  end
+ else if Assigned(Framebuffer.DeviceSetOffset) then
   begin
    Result:=Framebuffer.DeviceSetOffset(Framebuffer,X,Y,Pan);
   end
@@ -2546,6 +2573,9 @@ function FramebufferDeviceSetProperties(Framebuffer:PFramebufferDevice;Propertie
 {Return: ERROR_SUCCESS if completed or another error code on failure}
 
 {Note: Changing certain properties may cause the framebuffer to be reallocated}
+var
+ Current:TFramebufferProperties;
+ Updated:TFramebufferProperties;
 begin
  {}
  Result:=ERROR_INVALID_PARAMETER;
@@ -2568,6 +2598,42 @@ begin
  if Assigned(Framebuffer.DeviceSetProperties) then
   begin
    Result:=Framebuffer.DeviceSetProperties(Framebuffer,Properties);
+  end
+ else
+  begin
+   {Lock Framebuffer}
+   if MutexLock(Framebuffer.Lock) <> ERROR_SUCCESS then Exit;
+   try
+    {Get Current Properties}
+    Result:=FramebufferDeviceGetProperties(Framebuffer,@Current);
+    if Result <> ERROR_SUCCESS then Exit;
+
+    {Build Updated Properties}
+    Updated:=Properties^;
+    Updated.Flags:=Current.Flags;
+    Updated.Address:=Current.Address;
+    Updated.Size:=Current.Size;
+    Updated.Pitch:=Current.Pitch;
+    Updated.Format:=Current.Format;
+    Updated.CursorX:=Current.CursorX;
+    Updated.CursorY:=Current.CursorY;
+    Updated.CursorState:=Current.CursorState;
+
+    {Compare Properties}
+    if not CompareMem(@Current,@Updated,SizeOf(TFramebufferProperties)) then
+     begin
+      {Release Framebuffer}
+      Result:=FramebufferDeviceRelease(Framebuffer);
+      if Result <> ERROR_SUCCESS then Exit;
+
+      {Allocate Framebuffer}
+      Result:=FramebufferDeviceAllocate(Framebuffer,@Updated);
+      if Result <> ERROR_SUCCESS then Exit;
+     end;
+   finally
+    {Unlock Framebuffer}
+    MutexUnlock(Framebuffer.Lock);
+   end; 
   end;
 end;
 
@@ -2674,6 +2740,7 @@ begin
  Result.DeviceWaitSync:=nil;
  Result.DeviceGetOffset:=nil;
  Result.DeviceSetOffset:=nil;
+ Result.DeviceSetOffsetEx:=nil;
  Result.DeviceGetPalette:=nil;
  Result.DeviceSetPalette:=nil;
  Result.DeviceSetBacklight:=nil;
@@ -2770,7 +2837,6 @@ begin
  {Check Interfaces}
  if not(Assigned(Framebuffer.DeviceAllocate)) then Exit;
  if not(Assigned(Framebuffer.DeviceRelease)) then Exit;
- if not(Assigned(Framebuffer.DeviceSetProperties)) then Exit;
  
  {Check Framebuffer}
  Result:=ERROR_ALREADY_EXISTS;
@@ -3066,7 +3132,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {Framebuffer Helper Functions}
-function FramebufferDeviceGetCount:LongWord; inline;
+function FramebufferDeviceGetCount:LongWord;
 {Get the current framebuffer device count}
 begin
  {}
@@ -3075,7 +3141,7 @@ end;
 
 {==============================================================================}
 
-function FramebufferDeviceGetDefault:PFramebufferDevice; inline;
+function FramebufferDeviceGetDefault:PFramebufferDevice;
 {Get the current default framebuffer device}
 begin
  {}

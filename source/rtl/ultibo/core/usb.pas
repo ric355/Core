@@ -1,7 +1,7 @@
 {
 Ultibo USB interface unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -875,11 +875,26 @@ const
  {USB Hub Types}
  USBHUB_TYPE_NONE      = 0;
  
+ USBHUB_TYPE_MAX       = 0;
+
+ {USB Hub Type Names}
+ USBHUB_TYPE_NAMES:array[USBHUB_TYPE_NONE..USBHUB_TYPE_MAX] of String = (
+  'USBHUB_TYPE_NONE');
+ 
  {USB Hub States}
  USBHUB_STATE_DETACHED  = 0;
  USBHUB_STATE_DETACHING = 1;
  USBHUB_STATE_ATTACHING = 2;
  USBHUB_STATE_ATTACHED  = 3;
+ 
+ USBHUB_STATE_MAX       = 3;
+
+ {USB Hub State Names}
+ USBHUB_STATE_NAMES:array[USBHUB_STATE_DETACHED..USBHUB_STATE_MAX] of String = (
+  'USBHUB_STATE_DETACHED',
+  'USBHUB_STATE_DETACHING',
+  'USBHUB_STATE_ATTACHING',
+  'USBHUB_STATE_ATTACHED');
  
  {USB Hub Flags}
  USBHUB_FLAG_NONE              = $00000000;
@@ -1311,9 +1326,6 @@ type
   CompleteSplitNAKs:LongWord;
   {$ENDIF}
  end;
-  
- PUSBRequests = ^TUSBRequests;
- TUSBRequests = array[0..0] of PUSBRequest;
  
 {==============================================================================}
 type
@@ -1701,6 +1713,9 @@ function USBHubHasPortPowerSwitching(Hub:PUSBHub):Boolean;
 function USBHubHasPortCurrentProtection(Hub:PUSBHub):Boolean;
 
 function USBHubGetTTThinkTime(Hub:PUSBHub):Byte;
+
+function USBHubTypeToString(HubType:LongWord):String;
+function USBHubStateToString(HubState:LongWord):String;
 
 function USBHubStateToNotification(State:LongWord):LongWord;
 
@@ -2592,9 +2607,9 @@ begin
            Result:=USB_STATUS_INVALID_DATA;
            Exit;
           end;
-      
-         {Check Endpoint Count}
-         if (InterfaceIndex >= 0) and (AlternateSetting = 0) and ((EndpointIndex + 1) <> Device.Configurations[Index].Interfaces[InterfaceIndex].Descriptor.bNumEndpoints) then
+
+         {Check Endpoint Count} {Moved to USB_DESCRIPTOR_TYPE_ENDPOINT section}
+         (*if (InterfaceIndex >= 0) and (AlternateSetting = 0) and ((EndpointIndex + 1) <> Device.Configurations[Index].Interfaces[InterfaceIndex].Descriptor.bNumEndpoints) then
           begin
            if USB_LOG_ENABLED then USBLogError(Device,'Invalid configuration descriptor (Number of endpoints incorrect)');
            
@@ -2607,7 +2622,7 @@ begin
            
            Result:=USB_STATUS_INVALID_DATA;
            Exit;
-          end;          
+          end;*)
           
          {Check Alternate Setting}
          if PUSBInterfaceDescriptor(Descriptor).bAlternateSetting = 0 then
@@ -2638,21 +2653,34 @@ begin
            {Reset Alternate}
            AlternateSetting:=0;
            
-           {Create Interface}
-           Device.Configurations[Index].Interfaces[InterfaceIndex]:=AllocMem(SizeOf(TUSBInterface));
-           if Device.Configurations[Index].Interfaces[InterfaceIndex] = nil then Exit;
-          
-           {Set Descriptor}
-           Device.Configurations[Index].Interfaces[InterfaceIndex].Descriptor:=PUSBInterfaceDescriptor(Descriptor);
-           
-           {Check Endpoints}
-           if Length(Device.Configurations[Index].Interfaces[InterfaceIndex].Endpoints) > 0 then Exit;
-           
-           {Create Endpoints}
-           if Device.Configurations[Index].Interfaces[InterfaceIndex].Descriptor.bNumEndpoints > 0 then
+           {Check Interface Count}
+           if InterfaceIndex < Device.Configurations[Index].Descriptor.bNumInterfaces then
             begin
-             SetLength(Device.Configurations[Index].Interfaces[InterfaceIndex].Endpoints,Device.Configurations[Index].Interfaces[InterfaceIndex].Descriptor.bNumEndpoints);
-            end; 
+             {Create Interface}
+             Device.Configurations[Index].Interfaces[InterfaceIndex]:=AllocMem(SizeOf(TUSBInterface));
+             if Device.Configurations[Index].Interfaces[InterfaceIndex] = nil then Exit;
+
+             {Set Descriptor}
+             Device.Configurations[Index].Interfaces[InterfaceIndex].Descriptor:=PUSBInterfaceDescriptor(Descriptor);
+
+             {Check Endpoints}
+             if Length(Device.Configurations[Index].Interfaces[InterfaceIndex].Endpoints) > 0 then Exit;
+
+             {Create Endpoints}
+             if Device.Configurations[Index].Interfaces[InterfaceIndex].Descriptor.bNumEndpoints > 0 then
+              begin
+               SetLength(Device.Configurations[Index].Interfaces[InterfaceIndex].Endpoints,Device.Configurations[Index].Interfaces[InterfaceIndex].Descriptor.bNumEndpoints);
+              end;
+            end
+           else
+            begin
+             {Cannot ignore the extra interface, fail the configuration and return invalid}
+             if USB_LOG_ENABLED then USBLogError(Device,'Invalid configuration descriptor (Number of interfaces incorrect)');
+             if USB_LOG_ENABLED then USBLogError(Device,' (Index=' + IntToStr(Index) + ' InterfaceIndex=' + IntToStr(InterfaceIndex) + ' bNumInterfaces=' + IntToStr(Device.Configurations[Index].Descriptor.bNumInterfaces) + ')');
+   
+             Result:=USB_STATUS_INVALID_DATA;
+             Exit;
+            end;
           end
          else
           begin
@@ -2748,18 +2776,38 @@ begin
           begin
            {Increment Endpoint}
            Inc(EndpointIndex);
-         
-           {Set Descriptor}
-           Device.Configurations[Index].Interfaces[InterfaceIndex].Endpoints[EndpointIndex]:=PUSBEndpointDescriptor(Descriptor);
+
+           {Check Endpoint Count}
+           if EndpointIndex < Device.Configurations[Index].Interfaces[InterfaceIndex].Descriptor.bNumEndpoints then 
+            begin
+             {Set Descriptor}
+             Device.Configurations[Index].Interfaces[InterfaceIndex].Endpoints[EndpointIndex]:=PUSBEndpointDescriptor(Descriptor);
+            end
+           else
+            begin
+             {Ignore the extra endpoint and issue a warning}
+             if USB_LOG_ENABLED then USBLogWarn(Device,'Invalid configuration descriptor (Number of endpoints incorrect)');
+             if USB_LOG_ENABLED then USBLogWarn(Device,' (Index=' + IntToStr(Index) + ' InterfaceIndex=' + IntToStr(InterfaceIndex) + ' EndpointIndex=' + IntToStr(EndpointIndex) + ' bNumEndpoints=' + IntToStr(Device.Configurations[Index].Interfaces[InterfaceIndex].Descriptor.bNumEndpoints) + ')');
+            end;
           end
          else
           begin
            {Increment Endpoint}
            Inc(EndpointIndex);
 
-           {Set Descriptor}
-           Device.Configurations[Index].Interfaces[InterfaceIndex].Alternates[AlternateSetting - 1].Endpoints[EndpointIndex]:=PUSBEndpointDescriptor(Descriptor);
-          end;          
+           {Check Endpoint Count}
+           if EndpointIndex < Device.Configurations[Index].Interfaces[InterfaceIndex].Alternates[AlternateSetting - 1].Descriptor.bNumEndpoints then
+            begin
+             {Set Descriptor}
+             Device.Configurations[Index].Interfaces[InterfaceIndex].Alternates[AlternateSetting - 1].Endpoints[EndpointIndex]:=PUSBEndpointDescriptor(Descriptor);
+            end
+           else
+            begin
+             {Ignore the extra endpoint and issue a warning}
+             if USB_LOG_ENABLED then USBLogWarn(Device,'Invalid configuration descriptor (Number of alternate setting endpoints incorrect)');
+             if USB_LOG_ENABLED then USBLogWarn(Device,' (Index=' + IntToStr(Index) + ' InterfaceIndex=' + IntToStr(InterfaceIndex) + ' AlternateSetting=' + IntToStr(AlternateSetting) + ' EndpointIndex=' + IntToStr(EndpointIndex) + ' bNumEndpoints=' + IntToStr(Device.Configurations[Index].Interfaces[InterfaceIndex].Alternates[AlternateSetting - 1].Descriptor.bNumEndpoints) + ')');
+            end;
+          end;
         end;
        else
         begin
@@ -2791,16 +2839,16 @@ begin
       {Get Next Descriptor}
       Offset:=Offset + Descriptor.bLength;
      end;
- 
-    {Check Interface Count}
-    if (InterfaceIndex + 1) <> Device.Configurations[Index].Descriptor.bNumInterfaces then
+
+    {Check Interface Count} {Moved to USB_DESCRIPTOR_TYPE_INTERFACE section}
+    (*if (InterfaceIndex + 1) <> Device.Configurations[Index].Descriptor.bNumInterfaces then
      begin
       if USB_LOG_ENABLED then USBLogError(Device,'Invalid configuration descriptor (Number of interfaces incorrect)');
       if USB_LOG_ENABLED then USBLogError(Device,' (Index=' + IntToStr(Index) + ' InterfaceIndex=' + IntToStr(InterfaceIndex) + ' bNumInterfaces=' + IntToStr(Device.Configurations[Index].Descriptor.bNumInterfaces) + ')');
    
       Result:=USB_STATUS_INVALID_DATA;
       Exit;
-     end;
+     end;*)
     
     {Return Result}
     Result:=USB_STATUS_SUCCESS;
@@ -4743,6 +4791,7 @@ begin
  Device.Lock:=INVALID_HANDLE_VALUE;
  Device.Speed:=USB_SPEED_HIGH; {Default to high-speed unless overridden later}
  if Parent <> nil then Device.Depth:=Parent.Depth + 1;
+ if Parent = nil then Device.PortNumber:=1;
  Device.Descriptor:=nil;
  Device.LastError:=USB_STATUS_SUCCESS;
  Device.WaiterThread:=INVALID_HANDLE_VALUE;
@@ -7110,7 +7159,7 @@ function USBControlTransfer(Device:PUSBDevice;Endpoint:PUSBEndpointDescriptor;bR
 {Timeout: Milliseconds to wait for request to complete (INFINITE to wait forever)}
 {Return: USB_STATUS_SUCCESS if completed or another error code on failure}
 
-{Note: This function is very similar to USBControlRequest(Ex) but also returns the actual number of bytes tranferred}
+{Note: This function is very similar to USBControlRequest(Ex) but also returns the actual number of bytes transferred}
 var
  Status:LongWord;
  Request:PUSBRequest;
@@ -7974,7 +8023,8 @@ end;
 
 procedure USBHubUnbindDevices(Device:PUSBDevice;Driver:PUSBDriver;Callback:TUSBDeviceUnbind);
 {Enumerate each device in the USB tree and call an unbind callback for each one}
-{Device: USB device at which to start the enueration}
+{Device: USB device at which to start the enumeration}
+{Driver: The driver to unbind the device from (nil to unbind from current driver)}
 {Callback: Unbind callback function to execute for each device}
 var
  Hub:PUSBHub;
@@ -8023,7 +8073,7 @@ end;
 
 procedure USBHubEnumerateDevices(Device:PUSBDevice;Callback:TUSBDeviceEnumerate;Data:Pointer);
 {Enumerate each device in the USB tree and call an enumerate callback for each one}
-{Device: USB device at which to start the enueration}
+{Device: USB device at which to start the enumeration}
 {Callback: Enumerate callback function to execute for each device}
 var
  Hub:PUSBHub;
@@ -10571,6 +10621,34 @@ begin
   USB_HUB_CHARACTERISTIC_TTTT_24:Result:=24;
   USB_HUB_CHARACTERISTIC_TTTT_32:Result:=32;
  end;
+end;
+
+{==============================================================================}
+
+function USBHubTypeToString(HubType:LongWord):String;
+{Return a string describing the supplied Hub type value}
+begin
+ {}
+ Result:='USBHUB_TYPE_UNKNOWN';
+
+ if HubType <= USBHUB_TYPE_MAX then
+  begin
+   Result:=USBHUB_TYPE_NAMES[HubType];
+  end;
+end;
+
+{==============================================================================}
+
+function USBHubStateToString(HubState:LongWord):String;
+{Return a string describing the supplied Hub state value}
+begin
+ {}
+ Result:='USBHUB_STATE_UNKNOWN';
+
+ if HubState <= USBHUB_STATE_MAX then
+  begin
+   Result:=USBHUB_STATE_NAMES[HubState];
+  end;
 end;
 
 {==============================================================================}

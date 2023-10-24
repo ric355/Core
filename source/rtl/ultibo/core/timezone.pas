@@ -1,7 +1,7 @@
 {
 Ultibo Timezone interface unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -57,6 +57,10 @@ const
  
  {Timezone Signature}
  TIMEZONE_SIGNATURE = $ED9A1BC3;
+
+ {Timezone name constants}
+ TIMEZONE_NAME_LENGTH = SIZE_64;   {Length of timezone name}
+ TIMEZONE_DESC_LENGTH = SIZE_128;  {Length of timezone description}
  
 {==============================================================================}
 type
@@ -118,13 +122,13 @@ type
  TTimezoneEntry = record
   {Timezone Properties}
   Signature:LongWord;            {Signature for entry validation}
-  Name:String;
-  Description:String;
+  Name:array[0..TIMEZONE_NAME_LENGTH - 1] of Char; {Timezone name}
+  Description:array[0..TIMEZONE_DESC_LENGTH - 1] of Char; {Timezone description}
   Bias:LongInt;
-  StandardName:String;
+  StandardName:array[0..TIMEZONE_NAME_LENGTH - 1] of Char; {Standard name}
   StandardBias:LongInt;
   StandardStart:SYSTEMTIME;
-  DaylightName:String;
+  DaylightName:array[0..TIMEZONE_NAME_LENGTH - 1] of Char; {Daylight name}
   DaylightBias:LongInt;
   DaylightStart:SYSTEMTIME;
   {Internal Properties}
@@ -149,8 +153,10 @@ function TimezoneGetName(Timezone:PTimezoneEntry):String;
 function TimezoneGetDescription(Timezone:PTimezoneEntry):String;
 
 function TimezoneGetBias(Timezone:PTimezoneEntry):LongInt;
-function TimezoneGetState(Timezone:PTimezoneEntry):LongWord;
-function TimezoneGetActiveBias(Timezone:PTimezoneEntry):LongInt;
+function TimezoneGetState(Timezone:PTimezoneEntry):LongWord; inline;
+function TimezoneGetStateEx(Timezone:PTimezoneEntry;const DateTime:TDateTime):LongWord;
+function TimezoneGetActiveBias(Timezone:PTimezoneEntry):LongInt; inline;
+function TimezoneGetActiveBiasEx(Timezone:PTimezoneEntry;const DateTime:TDateTime):LongInt;
 
 function TimezoneGetStandardName(Timezone:PTimezoneEntry):String;
 function TimezoneGetStandardBias(Timezone:PTimezoneEntry):LongInt;
@@ -163,12 +169,15 @@ function TimezoneGetDaylightDate(Timezone:PTimezoneEntry;Next:Boolean):TDateTime
 function TimezoneGetDaylightStart(Timezone:PTimezoneEntry):SYSTEMTIME;
 
 function TimezoneFind(const Name:String):PTimezoneEntry;
+function TimezoneFindByStandard(const StandardName:String):PTimezoneEntry;
+function TimezoneFindByDaylight(const DaylightName:String):PTimezoneEntry;
+
 function TimezoneEnumerate(Callback:TTimezoneEnumerate;Data:Pointer):LongWord;
 
 {==============================================================================}
 {Timezone Helper Functions}
-function TimezoneGetCount:LongWord; inline;
-function TimezoneGetDefault:PTimezoneEntry; inline;
+function TimezoneGetCount:LongWord;
+function TimezoneGetDefault:PTimezoneEntry;
 function TimezoneSetDefault(Timezone:PTimezoneEntry):LongWord;
 
 function TimezoneCheck(Timezone:PTimezoneEntry):PTimezoneEntry;
@@ -200,7 +209,7 @@ var
  {Begin timezone builder data}
 const
  {Timezone count}
- TIMEZONE_COUNT = 140;
+ TIMEZONE_COUNT = 141;
 
 type
  {Timezone List}
@@ -213,7 +222,7 @@ type
 var
  {Timezone List}
  TimezoneList:TTimezoneList = (
-  TimezoneCount:140;
+  TimezoneCount:141;
   TimezoneData:(
 
    {Afghanistan Standard Time}
@@ -582,10 +591,10 @@ var
     Bias:360;
     StandardName:('Central Standard Time (Mexico)');
     StandardBias:0;
-    StandardStart:(wYear:0;wMonth:10;wDayOfWeek:0;wDay:5;wHour:2;wMinute:0;wSecond:0;wMilliseconds:0);
+    StandardStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
     DaylightName:('Central Daylight Time (Mexico)');
     DaylightBias:-60;
-    DaylightStart:(wYear:0;wMonth:4;wDayOfWeek:0;wDay:1;wHour:2;wMinute:0;wSecond:0;wMilliseconds:0);
+    DaylightStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
    ),
 
    {Chatham Islands Standard Time}
@@ -726,10 +735,10 @@ var
     Bias:-120;
     StandardName:('Egypt Standard Time');
     StandardBias:0;
-    StandardStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
+    StandardStart:(wYear:0;wMonth:10;wDayOfWeek:4;wDay:5;wHour:23;wMinute:59;wSecond:59;wMilliseconds:999);
     DaylightName:('Egypt Daylight Time');
     DaylightBias:-60;
-    DaylightStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
+    DaylightStart:(wYear:0;wMonth:4;wDayOfWeek:4;wDay:5;wHour:23;wMinute:59;wSecond:59;wMilliseconds:999);
    ),
 
    {Ekaterinburg Standard Time}
@@ -750,10 +759,10 @@ var
     Bias:-720;
     StandardName:('Fiji Standard Time');
     StandardBias:0;
-    StandardStart:(wYear:0;wMonth:1;wDayOfWeek:0;wDay:3;wHour:3;wMinute:0;wSecond:0;wMilliseconds:0);
+    StandardStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
     DaylightName:('Fiji Daylight Time');
     DaylightBias:-60;
-    DaylightStart:(wYear:0;wMonth:11;wDayOfWeek:0;wDay:2;wHour:2;wMinute:0;wSecond:0;wMilliseconds:0);
+    DaylightStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
    ),
 
    {FLE Standard Time}
@@ -870,10 +879,10 @@ var
     Bias:-210;
     StandardName:('Iran Standard Time');
     StandardBias:0;
-    StandardStart:(wYear:0;wMonth:9;wDayOfWeek:2;wDay:3;wHour:23;wMinute:59;wSecond:59;wMilliseconds:999);
+    StandardStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
     DaylightName:('Iran Daylight Time');
     DaylightBias:-60;
-    DaylightStart:(wYear:0;wMonth:3;wDayOfWeek:1;wDay:4;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
+    DaylightStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
    ),
 
    {Israel Standard Time}
@@ -885,19 +894,19 @@ var
     StandardStart:(wYear:0;wMonth:10;wDayOfWeek:0;wDay:5;wHour:2;wMinute:0;wSecond:0;wMilliseconds:0);
     DaylightName:('Jerusalem Daylight Time');
     DaylightBias:-60;
-    DaylightStart:(wYear:0;wMonth:3;wDayOfWeek:5;wDay:5;wHour:2;wMinute:0;wSecond:0;wMilliseconds:0);
+    DaylightStart:(wYear:0;wMonth:3;wDayOfWeek:5;wDay:4;wHour:2;wMinute:0;wSecond:0;wMilliseconds:0);
    ),
 
    {Jordan Standard Time}
    (Name:('Jordan Standard Time');
-    Description:('(UTC+02:00) Amman');
-    Bias:-120;
+    Description:('(UTC+03:00) Amman');
+    Bias:-180;
     StandardName:('Jordan Standard Time');
     StandardBias:0;
-    StandardStart:(wYear:0;wMonth:10;wDayOfWeek:5;wDay:5;wHour:1;wMinute:0;wSecond:0;wMilliseconds:0);
+    StandardStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
     DaylightName:('Jordan Daylight Time');
     DaylightBias:-60;
-    DaylightStart:(wYear:0;wMonth:3;wDayOfWeek:4;wDay:5;wHour:23;wMinute:59;wSecond:59;wMilliseconds:999);
+    DaylightStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
    ),
 
    {Kaliningrad Standard Time}
@@ -1062,10 +1071,10 @@ var
     Bias:0;
     StandardName:('Morocco Standard Time');
     StandardBias:0;
-    StandardStart:(wYear:0;wMonth:4;wDayOfWeek:0;wDay:2;wHour:3;wMinute:0;wSecond:0;wMilliseconds:0);
+    StandardStart:(wYear:0;wMonth:3;wDayOfWeek:0;wDay:3;wHour:3;wMinute:0;wSecond:0;wMilliseconds:0);
     DaylightName:('Morocco Daylight Time');
     DaylightBias:-60;
-    DaylightStart:(wYear:0;wMonth:5;wDayOfWeek:0;wDay:3;wHour:2;wMinute:0;wSecond:0;wMilliseconds:0);
+    DaylightStart:(wYear:0;wMonth:4;wDayOfWeek:0;wDay:4;wHour:2;wMinute:0;wSecond:0;wMilliseconds:0);
    ),
 
    {Mountain Standard Time}
@@ -1082,14 +1091,14 @@ var
 
    {Mountain Standard Time (Mexico)}
    (Name:('Mountain Standard Time (Mexico)');
-    Description:('(UTC-07:00) Chihuahua, La Paz, Mazatlan');
+    Description:('(UTC-07:00) La Paz, Mazatlan');
     Bias:420;
     StandardName:('Mountain Standard Time (Mexico)');
     StandardBias:0;
-    StandardStart:(wYear:0;wMonth:10;wDayOfWeek:0;wDay:5;wHour:2;wMinute:0;wSecond:0;wMilliseconds:0);
+    StandardStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
     DaylightName:('Mountain Daylight Time (Mexico)');
     DaylightBias:-60;
-    DaylightStart:(wYear:0;wMonth:4;wDayOfWeek:0;wDay:1;wHour:2;wMinute:0;wSecond:0;wMilliseconds:0);
+    DaylightStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
    ),
 
    {Myanmar Standard Time}
@@ -1278,10 +1287,10 @@ var
     Bias:240;
     StandardName:('Paraguay Standard Time');
     StandardBias:0;
-    StandardStart:(wYear:0;wMonth:3;wDayOfWeek:6;wDay:5;wHour:23;wMinute:59;wSecond:59;wMilliseconds:999);
+    StandardStart:(wYear:0;wMonth:3;wDayOfWeek:0;wDay:4;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
     DaylightName:('Paraguay Daylight Time');
     DaylightBias:-60;
-    DaylightStart:(wYear:0;wMonth:10;wDayOfWeek:6;wDay:1;wHour:23;wMinute:59;wSecond:59;wMilliseconds:999);
+    DaylightStart:(wYear:0;wMonth:10;wDayOfWeek:0;wDay:1;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
    ),
 
    {Qyzylorda Standard Time}
@@ -1484,6 +1493,18 @@ var
     StandardBias:0;
     StandardStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
     DaylightName:('South Africa Daylight Time');
+    DaylightBias:-60;
+    DaylightStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
+   ),
+
+   {South Sudan Standard Time}
+   (Name:('South Sudan Standard Time');
+    Description:('(UTC+02:00) Juba');
+    Bias:-120;
+    StandardName:('South Sudan Standard Time');
+    StandardBias:0;
+    StandardStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
+    DaylightName:('South Sudan Daylight Time');
     DaylightBias:-60;
     DaylightStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
    ),
@@ -1778,8 +1799,8 @@ var
 
    {Volgograd Standard Time}
    (Name:('Volgograd Standard Time');
-    Description:('(UTC+04:00) Volgograd');
-    Bias:-240;
+    Description:('(UTC+03:00) Volgograd');
+    Bias:-180;
     StandardName:('Volgograd Standard Time');
     StandardBias:0;
     StandardStart:(wYear:0;wMonth:0;wDayOfWeek:0;wDay:0;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
@@ -1857,7 +1878,7 @@ var
     StandardStart:(wYear:0;wMonth:10;wDayOfWeek:6;wDay:5;wHour:1;wMinute:0;wSecond:0;wMilliseconds:0);
     DaylightName:('West Bank Gaza Daylight Time');
     DaylightBias:-60;
-    DaylightStart:(wYear:0;wMonth:3;wDayOfWeek:6;wDay:4;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
+    DaylightStart:(wYear:0;wMonth:3;wDayOfWeek:6;wDay:5;wHour:0;wMinute:0;wSecond:0;wMilliseconds:0);
    ),
 
    {West Pacific Standard Time}
@@ -1980,12 +2001,6 @@ begin
  Timezone.DaylightBias:=Data.DaylightBias;
  Timezone.DaylightStart:=Data.DaylightStart;
  
- {Update Timezone}
- UniqueString(Timezone.Name);
- UniqueString(Timezone.Description);
- UniqueString(Timezone.StandardName);
- UniqueString(Timezone.DaylightName);
- 
  {Insert Timezone}
  if CriticalSectionLock(TimezoneTableLock) = ERROR_SUCCESS then
   begin
@@ -2010,10 +2025,15 @@ begin
      begin
       TimezoneDefault:=Timezone;
       
-      {Set Timezone Defaults}
-      TIMEZONE_DEFAULT_NAME:=Timezone.Name;
-      UniqueString(TIMEZONE_DEFAULT_NAME);
+      {Allocate Default Name}
+      SetLength(TIMEZONE_DEFAULT_NAME,TIMEZONE_NAME_LENGTH - 1);
       
+      {Set Timezone Defaults}
+      StrLCopy(PChar(TIMEZONE_DEFAULT_NAME),TimezoneDefault.Name,TIMEZONE_NAME_LENGTH - 1);
+      
+      {Update Default Name}
+      SetLength(TIMEZONE_DEFAULT_NAME,StrLen(PChar(TIMEZONE_DEFAULT_NAME)));
+
       {Update Timezone Offset}
       TimezoneUpdateOffset;
      end;
@@ -2084,9 +2104,14 @@ begin
       
       if TimezoneDefault <> nil then
        begin
+        {Allocate Default Name}
+        SetLength(TIMEZONE_DEFAULT_NAME,TIMEZONE_NAME_LENGTH - 1);
+      
         {Set Timezone Defaults}
-        TIMEZONE_DEFAULT_NAME:=TimezoneDefault.Name;
-        UniqueString(TIMEZONE_DEFAULT_NAME);
+        StrLCopy(PChar(TIMEZONE_DEFAULT_NAME),TimezoneDefault.Name,TIMEZONE_NAME_LENGTH - 1);
+      
+        {Update Default Name}
+        SetLength(TIMEZONE_DEFAULT_NAME,StrLen(PChar(TIMEZONE_DEFAULT_NAME)));
         
         {Update Timezone Offset}
         TimezoneUpdateOffset;
@@ -2130,9 +2155,14 @@ begin
     {Check Timezone}
     if TimezoneCheck(Timezone) <> Timezone then Exit;
 
+    {Allocate Result}
+    SetLength(Result,TIMEZONE_NAME_LENGTH - 1);
+
     {Get Name}
-    Result:=Timezone.Name;
-    UniqueString(Result);
+    StrLCopy(PChar(Result),Timezone.Name,TIMEZONE_NAME_LENGTH - 1);
+
+    {Update Result}
+    SetLength(Result,StrLen(PChar(Result)));
    finally
     {Release the Lock}
     CriticalSectionUnlock(TimezoneTableLock);
@@ -2158,9 +2188,14 @@ begin
     {Check Timezone}
     if TimezoneCheck(Timezone) <> Timezone then Exit;
 
+    {Allocate Result}
+    SetLength(Result,TIMEZONE_DESC_LENGTH - 1);
+
     {Get Description}
-    Result:=Timezone.Description;
-    UniqueString(Result);
+    StrLCopy(PChar(Result),Timezone.Description,TIMEZONE_DESC_LENGTH - 1);
+
+    {Update Result}
+    SetLength(Result,StrLen(PChar(Result)));
    finally
     {Release the Lock}
     CriticalSectionUnlock(TimezoneTableLock);
@@ -2197,7 +2232,22 @@ end;
 
 {==============================================================================}
 
-function TimezoneGetState(Timezone:PTimezoneEntry):LongWord;
+function TimezoneGetState(Timezone:PTimezoneEntry):LongWord; inline;
+{Get the state of the supplied Timezone at the current date and time}
+{Timezone: The timezone entry to get the state for}
+{Return: The TIME_ZONE_ID_* constant representing the standard / daylight state of the timezone}
+begin
+ {}
+ TimezoneGetStateEx(Timezone,Now);
+end;
+
+{==============================================================================}
+
+function TimezoneGetStateEx(Timezone:PTimezoneEntry;const DateTime:TDateTime):LongWord;
+{Get the state of the supplied Timezone at the specified date and time}
+{Timezone: The timezone entry to get the state for}
+{DateTime: The date and time to get the state of the timezone at}
+{Return: The TIME_ZONE_ID_* constant representing the standard / daylight state of the timezone}
 var
  Day:Word;
  Month:Word;
@@ -2221,11 +2271,11 @@ begin
     if TimezoneCheck(Timezone) <> Timezone then Exit;
  
     {Get Year}
-    DecodeDate(Date,Year,Month,Day);
+    DecodeDate(Trunc(DateTime),Year,Month,Day);
     if Year > 0 then
      begin
       {Get Current}
-      CurrentDate:=Now;
+      CurrentDate:=DateTime;
       
       {Get Daylight Start and End}
       StartDate:=TimezoneStartToDateTime(Timezone.DaylightStart,Year);
@@ -2290,7 +2340,22 @@ end;
 
 {==============================================================================}
 
-function TimezoneGetActiveBias(Timezone:PTimezoneEntry):LongInt;
+function TimezoneGetActiveBias(Timezone:PTimezoneEntry):LongInt; inline;
+{Get the bias (offset between UTC and Local) of the supplied Timezone at the current date and time}
+{Timezone: The timezone entry to get the bias for}
+{Return: The bias in minutes offset between UTC and Local including any daylight bias if active}
+begin
+ {}
+ TimezoneGetActiveBiasEx(Timezone,Now);
+end;
+
+{==============================================================================}
+
+function TimezoneGetActiveBiasEx(Timezone:PTimezoneEntry;const DateTime:TDateTime):LongInt;
+{Get the bias (offset between UTC and Local) of the supplied Timezone at the specified date and time}
+{Timezone: The timezone entry to get the bias for}
+{DateTime: The date and time to get the bias of the timezone at}
+{Return: The bias in minutes offset between UTC and Local}
 var
  Day:Word;
  Month:Word;
@@ -2314,11 +2379,11 @@ begin
     if TimezoneCheck(Timezone) <> Timezone then Exit;
  
     {Get Year}
-    DecodeDate(Date,Year,Month,Day);
+    DecodeDate(Trunc(DateTime),Year,Month,Day);
     if Year > 0 then
      begin
       {Get Current}
-      CurrentDate:=Now;
+      CurrentDate:=DateTime;
       
       {Get Daylight Start and End}
       StartDate:=TimezoneStartToDateTime(Timezone.DaylightStart,Year);
@@ -2399,9 +2464,14 @@ begin
     {Check Timezone}
     if TimezoneCheck(Timezone) <> Timezone then Exit;
 
+    {Allocate Result}
+    SetLength(Result,TIMEZONE_NAME_LENGTH - 1);
+
     {Get Standard Name}
-    Result:=Timezone.StandardName;
-    UniqueString(Result);
+    StrLCopy(PChar(Result),Timezone.StandardName,TIMEZONE_NAME_LENGTH - 1);
+
+    {Update Result}
+    SetLength(Result,StrLen(PChar(Result)));
    finally
     {Release the Lock}
     CriticalSectionUnlock(TimezoneTableLock);
@@ -2524,9 +2594,14 @@ begin
     {Check Timezone}
     if TimezoneCheck(Timezone) <> Timezone then Exit;
 
+    {Allocate Result}
+    SetLength(Result,TIMEZONE_NAME_LENGTH - 1);
+
     {Get Daylight Name}
-    Result:=Timezone.DaylightName;
-    UniqueString(Result);
+    StrLCopy(PChar(Result),Timezone.DaylightName,TIMEZONE_NAME_LENGTH - 1);
+
+    {Update Result}
+    SetLength(Result,StrLen(PChar(Result)));
    finally
     {Release the Lock}
     CriticalSectionUnlock(TimezoneTableLock);
@@ -2630,6 +2705,7 @@ begin
    end;
   end;
 end;
+
 {==============================================================================}
 
 function TimezoneFind(const Name:String):PTimezoneEntry;
@@ -2667,7 +2743,83 @@ begin
    end;
   end;
 end;
-       
+
+{==============================================================================}
+
+function TimezoneFindByStandard(const StandardName:String):PTimezoneEntry;
+var
+ Timezone:PTimezoneEntry;
+begin
+ {}
+ Result:=nil;
+ 
+ {Acquire the Lock}
+ if CriticalSectionLock(TimezoneTableLock) = ERROR_SUCCESS then
+  begin
+   try
+    {Get Timezone}
+    Timezone:=TimezoneTable;
+    while Timezone <> nil do
+     begin
+      {Check State}
+      if Timezone.Signature = TIMEZONE_SIGNATURE then
+       begin
+        {Check Standard Name}
+        if Uppercase(Timezone.StandardName) = Uppercase(StandardName) then
+         begin
+          {Return Result}
+          Result:=Timezone;
+          Exit;
+         end;
+       end;
+      {Get Next}
+      Timezone:=Timezone.Next;
+     end;
+   finally
+    {Release the Lock}
+    CriticalSectionUnlock(TimezoneTableLock);
+   end;
+  end;
+end;
+
+{==============================================================================}
+
+function TimezoneFindByDaylight(const DaylightName:String):PTimezoneEntry;
+var
+ Timezone:PTimezoneEntry;
+begin
+ {}
+ Result:=nil;
+ 
+ {Acquire the Lock}
+ if CriticalSectionLock(TimezoneTableLock) = ERROR_SUCCESS then
+  begin
+   try
+    {Get Timezone}
+    Timezone:=TimezoneTable;
+    while Timezone <> nil do
+     begin
+      {Check State}
+      if Timezone.Signature = TIMEZONE_SIGNATURE then
+       begin
+        {Check Daylight Name}
+        if Uppercase(Timezone.DaylightName) = Uppercase(DaylightName) then
+         begin
+          {Return Result}
+          Result:=Timezone;
+          Exit;
+         end;
+       end;
+      {Get Next}
+      Timezone:=Timezone.Next;
+     end;
+   finally
+    {Release the Lock}
+    CriticalSectionUnlock(TimezoneTableLock);
+   end;
+  end;
+end;
+
 {==============================================================================}
 
 function TimezoneEnumerate(Callback:TTimezoneEnumerate;Data:Pointer):LongWord;
@@ -2714,7 +2866,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {Timezone Helper Functions}
-function TimezoneGetCount:LongWord; inline;
+function TimezoneGetCount:LongWord;
 {Get the current timezone count}
 begin
  {}
@@ -2723,7 +2875,7 @@ end;
 
 {==============================================================================}
 
-function TimezoneGetDefault:PTimezoneEntry; inline;
+function TimezoneGetDefault:PTimezoneEntry;
 {Get the current default timezone}
 begin
  {}
@@ -2752,9 +2904,14 @@ begin
     {Set Timezone Default}
     TimezoneDefault:=Timezone;
     
+    {Allocate Default Name}
+    SetLength(TIMEZONE_DEFAULT_NAME,TIMEZONE_NAME_LENGTH - 1);
+
     {Set Timezone Defaults}
-    TIMEZONE_DEFAULT_NAME:=TimezoneDefault.Name;
-    UniqueString(TIMEZONE_DEFAULT_NAME);
+    StrLCopy(PChar(TIMEZONE_DEFAULT_NAME),Timezone.Name,TIMEZONE_NAME_LENGTH - 1);
+
+    {Update Default Name}
+    SetLength(TIMEZONE_DEFAULT_NAME,StrLen(PChar(TIMEZONE_DEFAULT_NAME)));
     
     {Update Timezone Offset}
     TimezoneUpdateOffset;

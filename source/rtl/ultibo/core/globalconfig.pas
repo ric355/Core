@@ -1,7 +1,7 @@
 {
 Ultibo Global Configuration Defaults.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -546,7 +546,7 @@ var
  CONSOLE_DMA_CLEAR:LongBool = True;              {If True then use DMA (If available) to clear console windows (Sets CONSOLE_FLAG_DMA_CLEAR on device)}
  CONSOLE_DMA_SCROLL:LongBool = True;             {If True then use DMA (If available) to scroll console windows (Sets CONSOLE_FLAG_DMA_SCROLL on device)}
  
- CONSOLE_REGISTER_LOGGING:LongBool = False;                  {If True then register any Console device as a Logging device (Only if Console unit included)}
+ CONSOLE_REGISTER_LOGGING:LongBool = False;                  {If True then register a Console device as a Logging device (Only if Console unit included)}
  CONSOLE_LOGGING_DEFAULT:LongBool = False;                   {If True then a Console device can be the default Logging device}
  CONSOLE_LOGGING_POSITION:LongWord = CONSOLE_POSITION_RIGHT; {The default Console Window position for the console Logging device}
  CONSOLE_LOGGING_DEVICE:String;                              {The console device Name (or Desription) to create the Logging window on, if blank create on default device}
@@ -602,6 +602,7 @@ var
  KERNEL_CONFIG:PChar;                         {The name of the Kernel configuration file (Where Applicable)}
  KERNEL_COMMAND:PChar;                        {The name of the Kernel command line file (Where Applicable)}
  FIRMWARE_FILES:PChar;                        {The name of the Firmare files (Where Applicable)}
+ DTB_FILES:PChar;                             {The name of the Device Tree (DTB) files (Where Applicable)}
  
  {Environment}
  ENVIRONMENT_STRING_COUNT:LongWord = SIZE_64; {How many strings are allocated in the environment block (for Get/SetEnvironmentVariable)}
@@ -609,6 +610,15 @@ var
  {Initial Ramdisk}
  INITIAL_RAMDISK_BASE:PtrUInt;                {The starting address of the initial ramdisk passed from the bootloader (If applicable)}
  INITIAL_RAMDISK_SIZE:UInt64;                 {The size in bytes of the initial ramdisk passed from the bootloader (If applicable)}
+
+{==============================================================================}
+{Date and time configuration}
+var
+ SYSTEM_DATE_FORMAT:String = 'dd-mmm-yyyy';  {Default format for date to string conversion (System functions only)}
+ SYSTEM_TIME_FORMAT:String = 'hh:nn:ss.zzz'; {Default format for time to string conversion (System functions only)}
+ 
+ ISO_DATE_FORMAT:String = 'yyyy-mm-dd';      {Format specified in ISO8601 for date to string conversion}
+ ISO_TIME_FORMAT:String = 'hh:nn:ss';        {Format specified in ISO8601 for time to string conversion}
  
 {==============================================================================}
 {Timezone configuration}
@@ -644,6 +654,8 @@ var
  DEVICE_REGISTER_MAILBOX:LongBool = True;      {If True then register the default mailbox device handlers}
  DEVICE_REGISTER_WATCHDOG:LongBool = True;     {If True then register the default watchdog device handlers} 
  
+ DEVICE_FIRMWARE_PATH:String = 'C:\firmware';  {The default path for loading device specific firmware (If applicable)}
+ 
 {==============================================================================}
 {Driver configuration}
 var
@@ -659,9 +671,10 @@ var
 {==============================================================================}
 {Serial configuration}
 var
- SERIAL_REGISTER_LOGGING:LongBool = False;      {If True then register any Serial device as a Logging device (Only if Serial unit included)}
+ SERIAL_REGISTER_LOGGING:LongBool = False;      {If True then register a Serial device as a Logging device (Only if Serial unit included)}
  SERIAL_LOGGING_DEFAULT:LongBool = False;       {If True then a Serial device can be the default Logging device}
  SERIAL_LOGGING_PARAMETERS:String = '0,N,8,1';  {The default serial settings for the serial logging device (BaudRate,Parity,DataBits,StopBits)(BaudRate 0 equals use default rate)}
+ SERIAL_LOGGING_DEVICE:String;                  {The serial device Name (or Desription) to send the Logging output to, if blank send to default device}
  
 {==============================================================================}
 {Logging configuration}
@@ -669,6 +682,8 @@ var
  {Logging defaults}
  LOGGING_DIRECT_ENABLE:LongBool;                 {If True then logging output is written directly and not scheduled via the logging thread}
  LOGGING_INCLUDE_COUNTER:LongBool = True;        {If True then logging output includes an incrementing counter to detect missed entries}
+ LOGGING_INCLUDE_DATE:LongBool;                  {If True then logging output includes the current date for each entry}
+ LOGGING_INCLUDE_TIME:LongBool;                  {If True then logging output includes the current time for each entry}
  LOGGING_INCLUDE_DATETIME:LongBool;              {If True then logging output includes the current date and time for each entry}
  LOGGING_INCLUDE_TICKCOUNT:LongBool;             {If True then logging output includes the 64-bit tick count value for each entry}
  
@@ -704,6 +719,15 @@ var
  
  {Touch}
  TOUCH_MOUSE_DATA_DEFAULT:LongBool = True; {If True then set all touch devices to add mouse data events for compatibility (Default: True)}
+ 
+ {HID}
+ HID_REGISTER_KEYBOARD:LongBool = True; {If True then register the HID keyboard consumer during boot (Only if HIDKeyboard unit included)}
+ HID_REGISTER_MOUSE:LongBool = True;    {If True then register the HID mouse consumer during boot (Only if HIDMouse unit included)}
+ HID_REGISTER_TOUCH:LongBool = True;    {If True then register the HID touch consumer during boot (Only if HIDTouch unit included)}
+ HID_REGISTER_JOYSTICK:LongBool = True; {If True then register the HID joystick consumer during boot (Only if HIDJoystick unit included)}
+ HID_REGISTER_GAMEPAD:LongBool = True;  {If True then register the HID gamepad consumer during boot (Only if HIDGamepad unit included)}
+ 
+ HID_MOUSE_REJECT_TOUCH:LongBool;       {If True then the HID mouse consumer should reject devices that include a touch screen collection}
  
  {PCI}
  PCI_AUTOSTART:LongBool = True;        {If True then auto start the PCI subsystem on boot (Only if PCI unit included)}
@@ -745,13 +769,16 @@ var
  USB_HUB_MESSAGESLOT_MAXIMUM:LongWord = SIZE_512; {Maximum number of messages for the USB hub messageslot}
  USB_HUB_REGISTER_DRIVER:LongBool = True;         {If True then register the USB HUB driver during boot (Only if USB unit included)(Note: USB cannot function correctly without a hub driver)}
  
+ {USB HID}
+ USB_HID_REGISTER_DRIVER:LongBool = True;      {If True then register the USB HID driver during boot (Only if USBHID unit included)}
+ 
  {USB Keyboard}
- USB_KEYBOARD_POLLING_INTERVAL:LongWord = 10;  {Override the default polling interval for a USB keyboard (Milliseconds)}
- USB_KEYBOARD_REGISTER_DRIVER:LongBool = True; {If True then register the USB Keyboard driver during boot (Only if Keyboard unit included)}
+ USB_KEYBOARD_POLLING_INTERVAL:LongWord = 10;   {Override the default polling interval for a USB keyboard (Milliseconds)}
+ USB_KEYBOARD_REGISTER_DRIVER:LongBool = False; {If True then register the USB Keyboard driver during boot (Only if Keyboard unit included)(Note: Replaced by USB HID driver)}
  
  {USB Mouse}
- USB_MOUSE_POLLING_INTERVAL:LongWord = 10;  {Override the default polling interval for a USB mouse (Milliseconds)}
- USB_MOUSE_REGISTER_DRIVER:LongBool = True; {If True then register the USB Mouse driver during boot (Only if Mouse unit included)}
+ USB_MOUSE_POLLING_INTERVAL:LongWord = 10;   {Override the default polling interval for a USB mouse (Milliseconds)}
+ USB_MOUSE_REGISTER_DRIVER:LongBool = False; {If True then register the USB Mouse driver during boot (Only if Mouse unit included)(Note: Replaced by USB HID driver)}
  
  {USB Storage}
  USB_STORAGE_FORCE_REMOVABLE:LongBool;        {If True then all USB storage devices will be assumed to be removable}
@@ -798,6 +825,16 @@ var
  BRCMSTB_MAX_LINK_SPEED:LongWord;           {Limit the BRCMSTB PCI host to a specific link speed (1, 2, 3 or 4)}
  BRCMSTB_NOASPM_L0S:LongBool;               {Disable L0s mode for Active State Power Management for the BRCMSTB PCI host}
  
+ {BCM434XX (Broadcom / Cypress Wireless LAN Controller)}
+ BCM434XX_WLAN_CLK_PIN:LongWord = GPIO_PIN_UNKNOWN;           {Wireless LAN 32KHz Clock GPIO pin}
+ BCM434XX_WLAN_CLK_PULL:LongWord = GPIO_PULL_UNKNOWN;         {Wireless LAN 32KHz Clock GPIO pull}
+ BCM434XX_WLAN_CLK_FUNCTION:LongWord = GPIO_FUNCTION_UNKNOWN; {Wireless LAN 32KHz Clock GPIO function}
+ 
+ BCM434XX_WLAN_ON_PIN:LongWord = GPIO_PIN_UNKNOWN;            {Wireless LAN Power GPIO pin}
+ BCM434XX_WLAN_ON_FUNCTION:LongWord = GPIO_FUNCTION_UNKNOWN;  {Wireless LAN Power GPIO function}
+ BCM434XX_WLAN_ON_ACTIVE_LOW:LongBool;                        {True if Power pin is Active Low (default Active High)}
+ BCM434XX_WLAN_ON_VIRTUAL:LongBool;                           {True if Power pin is a Virtual GPIO}
+ 
  {LAN78XX (Microchip LAN78XX USB Gigabit Ethernet)}
  LAN78XX_MAC_ADDRESS:String;                {The preconfigured MAC address for a LAN78XX device}
  
@@ -841,9 +878,9 @@ var
  BCM2708_REGISTER_GPIO:LongBool = True;     {If True then register the BCM2708 GPIO device during boot (Only if BCM2708 unit included)}
  BCM2708_REGISTER_UART0:LongBool = True;    {If True then register the BCM2708 UART0 device during boot (Only if BCM2708 unit included)}
  BCM2708_REGISTER_UART1:LongBool = True;    {If True then register the BCM2708 UART1 device during boot (Only if BCM2708 unit included)}
- BCM2708_REGISTER_SDHCI:LongBool = True;    {If True then register the BCM2708 SDHCI host during boot (Only if BCM2708 unit included)}
- BCM2708_REGISTER_SDHOST:LongBool = False;  {If True then register the BCM2708 SDHOST host during boot (Only if BCM2708 unit included)}
- BCM2708_REGISTER_SDIO:LongBool = False;    {If True then use the BCM2708 SDHCI as an SDIO controller for WiFi support (Disables SDHCI)(Only if BCM2708 unit included)}
+ BCM2708_REGISTER_SDHCI:LongBool = False;   {If True then register the BCM2708 SDHCI host during boot (Only if BCM2708 unit included)}
+ BCM2708_REGISTER_SDHOST:LongBool = True;   {If True then register the BCM2708 SDHOST host during boot (Only if BCMSDHOST unit included)}
+ BCM2708_REGISTER_SDIO:LongBool = True;     {If True then use the BCM2708 SDHCI as an SDIO controller for WiFi support (Disables SDHCI)(Only if BCM2708 unit included)}
  BCM2708_REGISTER_SPISLAVE:LongBool = True; {If True then register the BCM2708 SPI slave device during boot (Only if BCM2708 unit included)}
  BCM2708_REGISTER_I2CSLAVE:LongBool = True; {If True then register the BCM2708 I2C slave device during boot (Only if BCM2708 unit included)}
  BCM2708_REGISTER_PWMAUDIO:LongBool = True; {If True then register the BCM2708 PWM Audio device during boot (Only if BCM2708 unit included)}
@@ -891,9 +928,9 @@ var
  BCM2709_REGISTER_GPIO:LongBool = True;     {If True then register the BCM2709 GPIO device during boot (Only if BCM2709 unit included)}
  BCM2709_REGISTER_UART0:LongBool = True;    {If True then register the BCM2709 UART0 device during boot (Only if BCM2709 unit included)}
  BCM2709_REGISTER_UART1:LongBool = True;    {If True then register the BCM2709 UART1 device during boot (Only if BCM2709 unit included)}
- BCM2709_REGISTER_SDHCI:LongBool = True;    {If True then register the BCM2709 SDHCI host during boot (Only if BCM2709 unit included)}
- BCM2709_REGISTER_SDHOST:LongBool = False;  {If True then register the BCM2709 SDHOST host during boot (Only if BCM2709 unit included)}
- BCM2709_REGISTER_SDIO:LongBool = False;    {If True then use the BCM2709 SDHCI as an SDIO controller for WiFi support (Disables SDHCI)(Only if BCM2709 unit included)}
+ BCM2709_REGISTER_SDHCI:LongBool = False;   {If True then register the BCM2709 SDHCI host during boot (Only if BCM2709 unit included)}
+ BCM2709_REGISTER_SDHOST:LongBool = True;   {If True then register the BCM2709 SDHOST host during boot (Only if BCMSDHOST unit included)}
+ BCM2709_REGISTER_SDIO:LongBool = True;     {If True then use the BCM2709 SDHCI as an SDIO controller for WiFi support (Disables SDHCI)(Only if BCM2709 unit included)}
  BCM2709_REGISTER_SPISLAVE:LongBool = True; {If True then register the BCM2709 SPI slave device during boot (Only if BCM2709 unit included)}
  BCM2709_REGISTER_I2CSLAVE:LongBool = True; {If True then register the BCM2709 I2C slave device during boot (Only if BCM2709 unit included)}
  BCM2709_REGISTER_PWMAUDIO:LongBool = True; {If True then register the BCM2709 PWM Audio device during boot (Only if BCM2709 unit included)}
@@ -943,9 +980,9 @@ var
  BCM2710_REGISTER_GPIO:LongBool = True;     {If True then register the BCM2710 GPIO device during boot (Only if BCM2710 unit included)}
  BCM2710_REGISTER_UART0:LongBool = True;    {If True then register the BCM2710 UART0 device during boot (Only if BCM2710 unit included)}
  BCM2710_REGISTER_UART1:LongBool = True;    {If True then register the BCM2710 UART1 device during boot (Only if BCM2710 unit included)}
- BCM2710_REGISTER_SDHCI:LongBool = True;    {If True then register the BCM2710 SDHCI host during boot (Only if BCM2710 unit included)}
- BCM2710_REGISTER_SDHOST:LongBool = False;  {If True then register the BCM2710 SDHOST host during boot (Only if BCM2710 unit included)}
- BCM2710_REGISTER_SDIO:LongBool = False;    {If True then use the BCM2710 SDHCI as an SDIO controller for WiFi support (Disables SDHCI)(Only if BCM2710 unit included)}
+ BCM2710_REGISTER_SDHCI:LongBool = False;   {If True then register the BCM2710 SDHCI host during boot (Only if BCM2710 unit included)}
+ BCM2710_REGISTER_SDHOST:LongBool = True;   {If True then register the BCM2710 SDHOST host during boot (Only if BCMSDHOST unit included)}
+ BCM2710_REGISTER_SDIO:LongBool = True;     {If True then use the BCM2710 SDHCI as an SDIO controller for WiFi support (Disables SDHCI)(Only if BCM2710 unit included)}
  BCM2710_REGISTER_SPISLAVE:LongBool = True; {If True then register the BCM2710 SPI slave device during boot (Only if BCM2710 unit included)}
  BCM2710_REGISTER_I2CSLAVE:LongBool = True; {If True then register the BCM2710 I2C slave device during boot (Only if BCM2710 unit included)}
  BCM2710_REGISTER_PWMAUDIO:LongBool = True; {If True then register the BCM2710 PWM Audio device during boot (Only if BCM2710 unit included)}
@@ -1011,9 +1048,9 @@ var
  BCM2711_REGISTER_UART5:LongBool = True;    {If True then register the BCM2711 UART5 device during boot (Only if BCM2711 unit included)}
  
  BCM2711_REGISTER_EMMC0:LongBool = False;   {If True then register the BCM2711 EMMC0 (SDHCI) host during boot (Disables EMMC2)(Only if BCM2711 unit included)}
- BCM2711_REGISTER_EMMC1:LongBool = False;   {If True then register the BCM2711 EMMC1 (SDHOST) host during boot (Only if BCM2711 unit included)}
+ BCM2711_REGISTER_EMMC1:LongBool = False;   {If True then register the BCM2711 EMMC1 (SDHOST) host during boot (Only if BCMSDHOST unit included)}
  BCM2711_REGISTER_EMMC2:LongBool = True;    {If True then register the BCM2711 EMMC2 (SDHCI) host during boot (Only if BCM2711 unit included)}
- BCM2711_REGISTER_SDIO:LongBool = False;    {If True then use the BCM2711 EMMC0 (SDHCI) as an SDIO controller for WiFi support (Disables EMMC0)(Only if BCM2711 unit included)}
+ BCM2711_REGISTER_SDIO:LongBool = True;     {If True then use the BCM2711 EMMC0 (SDHCI) as an SDIO controller for WiFi support (Disables EMMC0)(Only if BCM2711 unit included)}
  
  BCM2711_REGISTER_DMA:LongBool = True;      {If True then register the BCM2711 DMA host during boot (Only if BCM2711 unit included)}
  BCM2711_REGISTER_PCM:LongBool = True;      {If True then register the BCM2711 PCM device during boot (Only if BCM2711 unit included)}
@@ -1237,6 +1274,8 @@ var
  NTP_POLLING_TIMEOUT:LongWord = 2000;           {The default NTP polling timeout (2000 milliseconds / 2 seconds)}
  NTP_POLLING_RETRIES:LongWord = 3;              {The default NTP polling retry count}
  NTP_RETRY_TIMEOUT:LongWord = 1000;             {The default NTP retry interval (1000 milliseconds / 1 second)}
+ NTP_CLOCK_TOLERANCE:LongWord = 10;             {The default NTP clock tolerance, apply differences equal or larger than this (10 milliseconds)}
+ NTP_USE_CLOCK_OFFSET:LongBool = True;          {If True use the calculated NTP clock offset, otherwise use the server transmit time}
  
  NTP_AUTOSTART:LongBool = True;                 {If True then auto start the NTP client on boot (Only if Services unit included)}
  
@@ -1323,10 +1362,11 @@ var
  AF16X2LCD_AUTOSTART:LongBool = True;           {If True then auto start the AF16x2LCD device on boot (Only if AF16x2LCD unit included)}
 
  {PiTFT28}
- PiTFT28_AUTOSTART:LongBool = True;             {If True then auto start the PiTFT28 device on boot (Only if PiTFT28 unit included)}
-
+ PITFT28_AUTOSTART:LongBool = True;             {If True then auto start the PiTFT28 device on boot (Only if PiTFT28 unit included)}
+ PITFT28_CAPACITIVE_TOUCH:LongBool;             {If True then configure the capacitive touch version of the PiTFT28 (Only if PiTFT28 unit included)}
+ 
  {PiTFT35}
- PiTFT35_AUTOSTART:LongBool = True;             {If True then auto start the PiTFT35 device on boot (Only if PiTFT35 unit included)}
+ PITFT35_AUTOSTART:LongBool = True;             {If True then auto start the PiTFT35 device on boot (Only if PiTFT35 unit included)}
 
  {RPiSenseHat}
  RPISENSE_AUTOSTART:LongBool = True;            {If True then auto start the RPiSenseHat device on boot (Only if RPiSenseHat unit included)}
@@ -1358,6 +1398,9 @@ function RoundDown(Value,Multiple:LongWord):LongWord;
 
 function DivRoundUp(Value,Divisor:LongInt):LongWord;
 function DivRoundClosest(Value,Divisor:LongInt):LongWord;
+
+function SignExtend32(Value,Bits:LongWord):LongInt;
+function SignExtend64(Value:UInt64;Bits:LongWord):Int64;
 
 function ILog2(Value:UInt64):LongWord; inline;
 
@@ -1445,6 +1488,8 @@ function GetLastError:LongWord; inline;
 procedure SetLastError(LastError:LongWord); inline;
 
 function StringHash(const Text:String):LongWord;
+
+function PtrShift:LongWord; inline;
 
 function PtrToHex(Value:Pointer):String; inline;
 function AddrToHex(Value:PtrUInt):String; inline;
@@ -1611,6 +1656,46 @@ begin
   begin
    Result:=(Value - (Divisor div 2)) div Divisor;
   end;
+end;
+
+{==============================================================================}
+
+function SignExtend32(Value,Bits:LongWord):LongInt;
+{Sign extend value from the current number of bits to 32 bits}
+begin
+ {}
+ {Check Bits}
+ if (Bits > 0) and (Bits < 32) then
+  begin
+   {Check if the high order bit is set (Negative)}
+   if (Value and (1 shl (Bits - 1))) <> 0 then
+    begin
+     {Combine the value with an all 1s mask (Sign Extend)}
+     Value:=Value or ($FFFFFFFF - ((1 shl Bits) - 1));
+    end;
+  end;
+
+ Result:=Value;
+end;
+
+{==============================================================================}
+
+function SignExtend64(Value:UInt64;Bits:LongWord):Int64;
+{Sign extend value from the current number of bits to 64 bits}
+begin
+ {}
+ {Check Bits}
+ if (Bits > 0) and (Bits < 64) then
+  begin
+   {Check if the high order bit is set (Negative)}
+   if (Value and (1 shl (Bits - 1))) <> 0 then
+    begin
+     {Combine the value with an all 1s mask (Sign Extend)}
+     Value:=Value or ($FFFFFFFFFFFFFFFF - ((1 shl Bits) - 1));
+    end;
+  end;
+
+ Result:=Value;
 end;
 
 {==============================================================================}
@@ -2265,6 +2350,15 @@ begin
      Result:=Result + ((Value + 1) * (LongWord(Count) + 257));
     end;
   end;
+end;
+
+{==============================================================================}
+
+function PtrShift:LongWord; inline;
+{Return the pointer shift value for the current architecture (1 shl PtrShift = SizeOf(Pointer))}
+begin
+ {}
+ Result:={$IFDEF CPU64}3{$ELSE CPU64}2{$ENDIF CPU64};
 end;
 
 {==============================================================================}

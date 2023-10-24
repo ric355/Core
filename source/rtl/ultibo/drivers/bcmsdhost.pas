@@ -1,7 +1,7 @@
 {
 Broadcom BCM27XX SDHOST driver
 
-Copyright (C) 2022 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -406,7 +406,6 @@ begin
    BCMSDHOSTHost.SDHCI.ClockMaximum:=ClockMaximum;
    {BCMSDHOST}
    BCMSDHOSTHost.IRQ:=IRQ;
-   BCMSDHOSTHost.Lock:=INVALID_HANDLE_VALUE;
    BCMSDHOSTHost.EnableFIQ:=EnableFIQ;
    BCMSDHOSTHost.GPIOFirst:=GPIOFirst;
    BCMSDHOSTHost.GPIOLast:=GPIOLast;
@@ -526,11 +525,11 @@ begin
  {}
  if PBCMSDHOSTHost(SDHCI).EnableFIQ then
   begin
-   Result:=SpinLockIRQFIQ(PBCMSDHOSTHost(SDHCI).Lock);
+   Result:=SpinLockIRQFIQ(SDHCI.Spin);
   end
  else
   begin
-   Result:=SpinLockIRQ(PBCMSDHOSTHost(SDHCI).Lock);
+   Result:=SpinLockIRQ(SDHCI.Spin);
   end;
 end;
 
@@ -543,11 +542,28 @@ begin
  {}
  if PBCMSDHOSTHost(SDHCI).EnableFIQ then
   begin
-   SpinUnlockIRQFIQ(PBCMSDHOSTHost(SDHCI).Lock);
+   SpinUnlockIRQFIQ(SDHCI.Spin);
   end
  else
   begin
-   SpinUnlockIRQ(PBCMSDHOSTHost(SDHCI).Lock);
+   SpinUnlockIRQ(SDHCI.Spin);
+  end;
+end;
+
+{==============================================================================}
+
+procedure BCMSDHOSTSignal(SDHCI:PSDHCIHost;Semaphore:TSemaphoreHandle);
+{Signal the BCMSDHOST host semaphore}
+{Note: Not intended to be called directly by applications}
+begin
+ {}
+ if PBCMSDHOSTHost(SDHCI).EnableFIQ then
+  begin
+   TaskerSemaphoreSignal(Semaphore,1);
+  end
+ else
+  begin
+   SemaphoreSignal(Semaphore);
   end;
 end;
 
@@ -751,7 +767,14 @@ begin
 
      {Use DMA Buffer}
      SDHCI.DMAData.Dest:=SDHCI.DMABuffer;
-    end; 
+    end;
+
+   {Check Cache}
+   if not(DMA_CACHE_COHERENT) then
+    begin
+     {Clean Cache (Dest)}
+     CleanDataCacheRange(PtrUInt(SDHCI.DMAData.Dest),SDHCI.DMAData.Size);
+    end;
   end
  else
   begin
@@ -761,7 +784,7 @@ begin
    {Setup DMA Data}
    SDHCI.DMAData.Source:=Command.Data.Data;
    SDHCI.DMAData.Dest:=Pointer(PtrUInt(SDHCI.Address) + PtrUInt(BCMSDHOST_SDDATA));
-   SDHCI.DMAData.Flags:=DMA_DATA_FLAG_DEST_NOINCREMENT or DMA_DATA_FLAG_DEST_DREQ or DMA_DATA_FLAG_NOINVALIDATE;
+   SDHCI.DMAData.Flags:=DMA_DATA_FLAG_DEST_NOINCREMENT or DMA_DATA_FLAG_DEST_DREQ or DMA_DATA_FLAG_SOURCE_WIDE or DMA_DATA_FLAG_NOINVALIDATE;
    SDHCI.DMAData.StrideLength:=0;
    SDHCI.DMAData.SourceStride:=0;
    SDHCI.DMAData.DestStride:=0;
@@ -775,7 +798,9 @@ begin
      {Copy Data to DMA Buffer}
      SDHCI.DMAData.Source:=SDHCI.DMABuffer;
      System.Move(Command.Data.Data^,SDHCI.DMAData.Source^,SDHCI.DMAData.Size);
-    end; 
+    end;
+
+   {DMA Host will Clean Cache on Source Data}
   end;
 
  {The block doesn't manage the FIFO DREQs properly for multi-block transfers, so don't attempt to DMA the final few words.
@@ -866,7 +891,7 @@ begin
   
    SDHCI.Command.Status:=MMC_STATUS_INVALID_SEQUENCE;
   
-   SemaphoreSignal(SDHCI.Wait);
+   BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
   end
  else if (Status and (BCMSDHOST_SDHSTS_CMD_TIME_OUT or BCMSDHOST_SDHSTS_REW_TIME_OUT)) <> 0 then
   begin
@@ -876,7 +901,7 @@ begin
 
    SDHCI.Command.Status:=MMC_STATUS_TIMEOUT;
    
-   SemaphoreSignal(SDHCI.Wait);
+   BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
   end;
  
  {Memory Barrier}
@@ -937,7 +962,7 @@ begin
      
      SDHCI.Command.Status:=MMC_STATUS_INVALID_DATA;
      
-     SemaphoreSignal(SDHCI.Wait);
+     BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
      Exit;
     end;
   
@@ -977,7 +1002,7 @@ begin
          
          SDHCI.Command.Status:=MMC_STATUS_TIMEOUT;
          
-         SemaphoreSignal(SDHCI.Wait);
+         BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
          Exit;
         end; 
        
@@ -1077,7 +1102,7 @@ begin
      
      SDHCI.Command.Status:=MMC_STATUS_INVALID_DATA;
      
-     SemaphoreSignal(SDHCI.Wait);
+     BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
      Exit;
     end;
 
@@ -1117,7 +1142,7 @@ begin
          
          SDHCI.Command.Status:=MMC_STATUS_TIMEOUT;
          
-         SemaphoreSignal(SDHCI.Wait);
+         BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
          Exit;
         end; 
        {Wait for FIFO}
@@ -1213,7 +1238,7 @@ begin
    BCMSDHOSTWaitTransferComplete(SDHCI,AllowWait);
   end; 
 
- SemaphoreSignal(SDHCI.Wait);
+ BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
  
  Result:=MMC_STATUS_SUCCESS; 
  
@@ -1484,7 +1509,7 @@ begin
    
    SDHCI.Command.Status:=MMC_STATUS_HARDWARE_ERROR;
    
-   SemaphoreSignal(SDHCI.Wait);
+   BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
    Exit;
   end
  else if (Command and BCMSDHOST_SDCMD_FAIL_FLAG) <> 0 then 
@@ -1511,7 +1536,7 @@ begin
 
        SDHCI.Command.Status:=MMC_STATUS_TIMEOUT;
        
-       SemaphoreSignal(SDHCI.Wait);
+       BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
       end
      else
       begin
@@ -1521,7 +1546,7 @@ begin
 
        SDHCI.Command.Status:=MMC_STATUS_INVALID_SEQUENCE;
        
-       SemaphoreSignal(SDHCI.Wait);
+       BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
       end;
       
      {Read Debug Mode Register}
@@ -1562,7 +1587,7 @@ begin
   begin
    SDHCI.Command.Status:=MMC_STATUS_SUCCESS;
    
-   SemaphoreSignal(SDHCI.Wait);
+   BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
   end
  else if SDHCI.Command.DataCompleted then
   begin
@@ -1713,25 +1738,25 @@ begin
     begin
      SDHCI.Command.Status:=MMC_STATUS_INVALID_SEQUENCE;
     
-     SemaphoreSignal(SDHCI.Wait);
+     BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
     end
    else if (InterruptMask and (BCMSDHOST_SDHSTS_CRC16_ERROR or BCMSDHOST_SDHSTS_FIFO_ERROR)) <> 0 then  
     begin
      SDHCI.Command.Status:=MMC_STATUS_INVALID_SEQUENCE;
      
-     SemaphoreSignal(SDHCI.Wait);
+     BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
     end
    else if (InterruptMask and BCMSDHOST_SDHSTS_REW_TIME_OUT) <> 0 then  
     begin
      SDHCI.Command.Status:=MMC_STATUS_TIMEOUT;
     
-     SemaphoreSignal(SDHCI.Wait);
+     BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
     end
    else if (InterruptMask and BCMSDHOST_SDHSTS_CMD_TIME_OUT) <> 0 then 
     begin
      SDHCI.Command.Status:=MMC_STATUS_TIMEOUT;
     
-     SemaphoreSignal(SDHCI.Wait);
+     BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
     end;
   end
  else
@@ -1795,7 +1820,7 @@ begin
      SDHCI.Command.Status:=MMC_STATUS_INVALID_SEQUENCE;
      
      BCMSDHOSTFinishData(SDHCI,False);
-     SemaphoreSignal(SDHCI.Wait);
+     BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
      Exit;
     end
    else
@@ -1803,7 +1828,7 @@ begin
      SDHCI.Command.Status:=MMC_STATUS_TIMEOUT;
     
      BCMSDHOSTFinishData(SDHCI,False);
-     SemaphoreSignal(SDHCI.Wait);
+     BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
      Exit;
     end;
   end;  
@@ -1879,7 +1904,7 @@ begin
      SDHCI.Command.Status:=MMC_STATUS_INVALID_SEQUENCE;
      
      BCMSDHOSTFinishData(SDHCI,False);
-     SemaphoreSignal(SDHCI.Wait);
+     BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
      Exit;
     end
    else
@@ -1887,7 +1912,7 @@ begin
      SDHCI.Command.Status:=MMC_STATUS_TIMEOUT;
      
      BCMSDHOSTFinishData(SDHCI,False);
-     SemaphoreSignal(SDHCI.Wait);
+     BCMSDHOSTSignal(SDHCI,SDHCI.Wait);
      Exit;
     end;
   end;  
@@ -2223,8 +2248,8 @@ begin
           BCMSDHOSTUnlock(SDHCI);
          end;
 
-        {Get Command Timeout (Default 100ms)}
-        Timeout:=100;
+        {Get Command Timeout (Default 1000ms)}
+        Timeout:=1000;
         if Command.Timeout > Timeout then Timeout:=Command.Timeout;
 
         {Wait for Signal with Timeout}
@@ -2591,9 +2616,6 @@ begin
  if MMC_LOG_ENABLED then MMCLogDebug(nil,'BCMSDHOST: Firmware sets clock divider = ' + BooleanToString(PBCMSDHOSTHost(SDHCI).FirmwareSetsClockDivider));
  {$ENDIF}
 
- {Create the Lock}
- PBCMSDHOSTHost(SDHCI).Lock:=SpinCreate;
-
  {SDHCI Host Start operations (Non standard host)}
  {Check Clock Maximum}
  if SDHCI.ClockMaximum <> 0 then
@@ -2675,7 +2697,7 @@ begin
  {Request the IRQ/FIQ}
  if PBCMSDHOSTHost(SDHCI).EnableFIQ then
   begin
-   RegisterInterrupt(PBCMSDHOSTHost(SDHCI).IRQ,CPUIDToMask(FIQ_ROUTING),INTERRUPT_PRIORITY_DEFAULT,INTERRUPT_FLAG_SHARED or INTERRUPT_FLAG_FIQ,TSharedInterruptHandler(BCMSDHOSTSharedInterruptHandler),SDHCI);
+   RegisterInterrupt(PBCMSDHOSTHost(SDHCI).IRQ,CPUIDToMask(FIQ_ROUTING),INTERRUPT_PRIORITY_FIQ,INTERRUPT_FLAG_SHARED or INTERRUPT_FLAG_FIQ,TSharedInterruptHandler(BCMSDHOSTSharedInterruptHandler),SDHCI);
   end
  else
   begin
@@ -2856,7 +2878,7 @@ begin
  {Release the IRQ/FIQ}
  if PBCMSDHOSTHost(SDHCI).EnableFIQ then
   begin
-   DeregisterInterrupt(PBCMSDHOSTHost(SDHCI).IRQ,CPUIDToMask(FIQ_ROUTING),INTERRUPT_PRIORITY_DEFAULT,INTERRUPT_FLAG_SHARED or INTERRUPT_FLAG_FIQ,TSharedInterruptHandler(BCMSDHOSTSharedInterruptHandler),SDHCI);
+   DeregisterInterrupt(PBCMSDHOSTHost(SDHCI).IRQ,CPUIDToMask(FIQ_ROUTING),INTERRUPT_PRIORITY_FIQ,INTERRUPT_FLAG_SHARED or INTERRUPT_FLAG_FIQ,TSharedInterruptHandler(BCMSDHOSTSharedInterruptHandler),SDHCI);
   end
  else
   begin
@@ -2878,14 +2900,6 @@ begin
 
    {Destroy MMC}
    MMCDeviceDestroy(MMC);
-  end;
-
- {Destroy the Lock}
- if PBCMSDHOSTHost(SDHCI).Lock <> INVALID_HANDLE_VALUE then
-  begin
-   SpinDestroy(PBCMSDHOSTHost(SDHCI).Lock);
-
-   PBCMSDHOSTHost(SDHCI).Lock:=INVALID_HANDLE_VALUE
   end;
 
  {Free DMA Buffer}

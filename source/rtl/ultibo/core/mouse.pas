@@ -1,7 +1,7 @@
 {
 Ultibo Mouse interface unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2022 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -37,10 +37,17 @@ References
 Mouse Devices
 =============
 
- This unit provides both the Mouse device interface and the generic USB HID mouse driver.
-
-USB Mouse Devices
-=================
+ This unit provides the Mouse device interface and mouse API to be used
+ by both drivers and applications.
+ 
+ The API includes functions to create, register, locate, read, write,
+ control and configure each connected mouse device.
+ 
+ The API supports a global mouse buffer so multiple devices can feed data
+ into a common buffer as well as a buffer per device to allow each device
+ to be used for a specific purpose. For example an application with two
+ separate displays may choose to have a mouse or pointing device to control
+ each one individually.
 
 }
 
@@ -52,7 +59,7 @@ unit Mouse;
 
 interface
 
-uses GlobalConfig,GlobalConst,GlobalTypes,Platform,Threads,Devices,USB,SysUtils;
+uses GlobalConfig,GlobalConst,GlobalTypes,Platform,Threads,Devices,SysUtils;
 
 {==============================================================================}
 {Global definitions}
@@ -96,12 +103,16 @@ const
  {Mouse Device Flags}
  MOUSE_FLAG_NONE         = $00000000;
  MOUSE_FLAG_NON_BLOCK    = $00000001; {If set device reads are non blocking (Also supported in Flags parameter of MouseReadEx)}
- MOUSE_FLAG_DIRECT_READ  = $00000002; {If set device writes mouse data to its local buffer and which must be read using MouseDeviceRead}
+ MOUSE_FLAG_DIRECT_READ  = $00000002; {If set device writes mouse data to its local buffer which must be read using MouseDeviceRead}
  MOUSE_FLAG_SWAP_BUTTONS = $00000004; {If set left and right mouse buttons will be swapped in mouse data}
  MOUSE_FLAG_PEEK_BUFFER  = $00000008; {Peek at the buffer to see if any data is available, don't remove it (Used only in Flags parameter of MouseReadEx)}
+ MOUSE_FLAG_SWAP_XY      = $00000010; {If set swap the X and Y coordinates}
+ MOUSE_FLAG_INVERT_X     = $00000020; {If set invert the X coordinate}
+ MOUSE_FLAG_INVERT_Y     = $00000040; {If set invert the Y coordinate}
+ MOUSE_FLAG_SWAP_MAX_XY  = $00000080; {If set swap the maximum X and Y values}
  
  {Flags supported by MOUSE_CONTROL_GET/SET/CLEAR_FLAG}
- MOUSE_FLAG_MASK = MOUSE_FLAG_NON_BLOCK or MOUSE_FLAG_DIRECT_READ or MOUSE_FLAG_SWAP_BUTTONS;
+ MOUSE_FLAG_MASK = MOUSE_FLAG_NON_BLOCK or MOUSE_FLAG_DIRECT_READ or MOUSE_FLAG_SWAP_BUTTONS or MOUSE_FLAG_SWAP_XY or MOUSE_FLAG_INVERT_X or MOUSE_FLAG_INVERT_Y or MOUSE_FLAG_SWAP_MAX_XY;
  
  {Mouse Device Control Codes}
  MOUSE_CONTROL_GET_FLAG         = 1;  {Get Flag}
@@ -116,7 +127,6 @@ const
  MOUSE_CONTROL_GET_MAX_BUTTONS  = 10; {Get Maximum Buttons mask (eg MOUSE_LEFT_BUTTON or MOUSE_RIGHT_BUTTON etc)}
  MOUSE_CONTROL_GET_ROTATION     = 11; {Get Rotation value (0, 90, 180, 270)(Only where supported by the driver)}
  MOUSE_CONTROL_SET_ROTATION     = 12; {Set Rotation value (0, 90, 180, 270)(Only where supported by the driver)}
- //To Do //Acceleration
 
  {Mouse Buffer Size}
  MOUSE_BUFFER_SIZE = 512; 
@@ -158,9 +168,7 @@ var
 {==============================================================================}
 const
  {USB Mouse specific constants}
- USBMOUSE_DRIVER_NAME = 'USB Mouse Driver (HID boot protocol)'; {Name of USB mouse driver}
-
- USBMOUSE_MOUSE_DESCRIPTION = 'USB HID Mouse'; {Description of USB mouse device}
+ {Note: The following constants are duplicated with the USBMouse unit for backwards compatibility}
  
  {HID Interface Subclass types (See USB HID v1.11 specification)}
  USB_HID_SUBCLASS_NONE           = 0;     {Section 4.2}
@@ -232,6 +240,17 @@ type
   Buffer:array[0..(MOUSE_BUFFER_SIZE - 1)] of TMouseData; 
  end;
  
+ {Mouse Properties}
+ PMouseProperties = ^TMouseProperties;
+ TMouseProperties = record
+  Flags:LongWord;        {Device flags (eg MOUSE_FLAG_SWAP_BUTTONS)}
+  Rotation:LongWord;     {Screen Rotation (eg MOUSE_ROTATION_180)}
+  MaxX:LongWord;         {Maximum (absolute) X value for the mouse device}
+  MaxY:LongWord;         {Maximum (absolute) Y value for the mouse device}
+  MaxWheel:LongWord;     {Maximum (absolute) wheel value for the mouse device}
+  MaxButtons:LongWord;   {Maximum buttons mask (eg MOUSE_LEFT_BUTTON or MOUSE_RIGHT_BUTTON etc)}
+ end;
+ 
  {Mouse Device}
  PMouseDevice = ^TMouseDevice;
  
@@ -242,32 +261,40 @@ type
  
  {Mouse Device Methods}
  TMouseDeviceRead = function(Mouse:PMouseDevice;Buffer:Pointer;Size:LongWord;var Count:LongWord):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
- TMouseDeviceControl = function(Mouse:PMouseDevice;Request:Integer;Argument1:LongWord;var Argument2:LongWord):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
+ TMouseDeviceUpdate = function(Mouse:PMouseDevice):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
+ TMouseDeviceControl = function(Mouse:PMouseDevice;Request:Integer;Argument1:PtrUInt;var Argument2:PtrUInt):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
+ 
+ TMouseDeviceGetProperties = function(Mouse:PMouseDevice;Properties:PMouseProperties):LongWord;{$IFDEF i386} stdcall;{$ENDIF}
  
  TMouseDevice = record
   {Device Properties}
-  Device:TDevice;                      {The Device entry for this Mouse}
-  {Mouse Properties}
-  MouseId:LongWord;                    {Unique Id of this Mouse in the Mouse table}
-  MouseState:LongWord;                 {Mouse state (eg MOUSE_STATE_ATTACHED)}
-  MouseRate:LongWord;                  {Mouse sample rate (Samples per second)}
-  DeviceRead:TMouseDeviceRead;         {A Device specific DeviceRead method implementing a standard Mouse device interface (Or nil if the default method is suitable)}
-  DeviceControl:TMouseDeviceControl;   {A Device specific DeviceControl method implementing a standard Mouse device interface (Or nil if the default method is suitable)}
+  Device:TDevice;                                {The Device entry for this Mouse}
+  {Mouse Properties}                             
+  MouseId:LongWord;                              {Unique Id of this Mouse in the Mouse table}
+  MouseState:LongWord;                           {Mouse state (eg MOUSE_STATE_ATTACHED)}
+  MouseRate:LongWord;                            {Mouse sample rate (Samples per second)}
+  DeviceRead:TMouseDeviceRead;                   {A Device specific DeviceRead method implementing a standard Mouse device interface (Or nil if the default method is suitable)}
+  DeviceUpdate:TMouseDeviceUpdate;               {A Device specific DeviceUpdate method implementing a standard Mouse device interface (Or nil if the default method is suitable)}
+  DeviceControl:TMouseDeviceControl;             {A Device specific DeviceControl method implementing a standard Mouse device interface (Or nil if the default method is suitable)}
+  DeviceGetProperties:TMouseDeviceGetProperties; {A Device specific DeviceGetProperties method implementing a standard Mouse device interface (Or nil if the default method is suitable)}
   {Driver Properties}
-  Lock:TMutexHandle;                   {Mouse lock}
-  Buffer:TMouseBuffer;                 {Mouse input buffer}
-  {Statistics Properties}
-  ReceiveCount:LongWord;
-  ReceiveErrors:LongWord;
-  BufferOverruns:LongWord;
-  {Internal Properties}                                                                        
-  Prev:PMouseDevice;                   {Previous entry in Mouse table}
-  Next:PMouseDevice;                   {Next entry in Mouse table}
+  Lock:TMutexHandle;                             {Mouse lock}
+  Buffer:TMouseBuffer;                           {Mouse input buffer}
+  Properties:TMouseProperties;                   {Device properties}
+  {Statistics Properties}                        
+  ReceiveCount:LongWord;                         
+  ReceiveErrors:LongWord;                        
+  BufferOverruns:LongWord;                       
+  {Internal Properties}                                                                                  
+  Prev:PMouseDevice;                             {Previous entry in Mouse table}
+  Next:PMouseDevice;                             {Next entry in Mouse table}
  end;
  
 {==============================================================================}
 type
  {USB Mouse specific types}
+ {Note: The following structure is duplicated with the USBMouse unit for backwards compatibility}
+ 
  {USB HID Descriptor}
  PUSBHIDDescriptor = ^TUSBHIDDescriptor;
  TUSBHIDDescriptor = packed record
@@ -281,28 +308,9 @@ type
   {Note: Up to two optional bHIDDescriptorType/wHIDDescriptorLength pairs after the Report descriptor details}
  end;
  
- {USB Mouse Device}
- PUSBMouseDevice = ^TUSBMouseDevice;
- TUSBMouseDevice = record
-  {Mouse Properties}
-  Mouse:TMouseDevice;
-  {USB Properties}
-  HIDInterface:PUSBInterface;            {USB HID Mouse Interface}
-  ReportRequest:PUSBRequest;             {USB request for mouse report data}
-  ReportEndpoint:PUSBEndpointDescriptor; {USB Mouse Interrupt IN Endpoint}
-  HIDDescriptor:PUSBHIDDescriptor;       {USB HID Descriptor for mouse} 
-  ReportDescriptor:Pointer;              {USB HID Report Descriptor for mouse}
-  PendingCount:LongWord;                 {Number of USB requests pending for this mouse}
-  WaiterThread:TThreadId;                {Thread waiting for pending requests to complete (for mouse detachment)}
- end;
-  
 {==============================================================================}
 {var}
  {Mouse specific variables}
-
-{==============================================================================}
-{var}
- {USB Mouse specific variables}
  
 {==============================================================================}
 {Initialization Functions}
@@ -318,8 +326,11 @@ function MouseWrite(Buffer:Pointer;Size,Count:LongWord):LongWord;
 
 function MouseFlush:LongWord;
 
-function MouseDeviceRead(Mouse:PMouseDevice;Buffer:Pointer;Size:LongWord;var Count:LongWord):LongWord; 
-function MouseDeviceControl(Mouse:PMouseDevice;Request:Integer;Argument1:LongWord;var Argument2:LongWord):LongWord;
+function MouseDeviceRead(Mouse:PMouseDevice;Buffer:Pointer;Size:LongWord;var Count:LongWord):LongWord;
+function MouseDeviceUpdate(Mouse:PMouseDevice):LongWord;
+function MouseDeviceControl(Mouse:PMouseDevice;Request:Integer;Argument1:PtrUInt;var Argument2:PtrUInt):LongWord;
+
+function MouseDeviceGetProperties(Mouse:PMouseDevice;Properties:PMouseProperties):LongWord;
 
 function MouseDeviceSetState(Mouse:PMouseDevice;State:LongWord):LongWord;
 
@@ -344,26 +355,19 @@ function SysConsoleShowMouse(X,Y:LongWord;AUserData:Pointer):Boolean;
 function SysConsoleReadMouse(var X,Y,Buttons:LongWord;AUserData:Pointer):Boolean;
 
 {==============================================================================}
-{USB Mouse Functions}
-function USBMouseDeviceRead(Mouse:PMouseDevice;Buffer:Pointer;Size:LongWord;var Count:LongWord):LongWord; 
-function USBMouseDeviceControl(Mouse:PMouseDevice;Request:Integer;Argument1:LongWord;var Argument2:LongWord):LongWord;
-
-function USBMouseDriverBind(Device:PUSBDevice;Interrface:PUSBInterface):LongWord;
-function USBMouseDriverUnbind(Device:PUSBDevice;Interrface:PUSBInterface):LongWord;
-
-procedure USBMouseReportWorker(Request:PUSBRequest); 
-procedure USBMouseReportComplete(Request:PUSBRequest); 
-
-{==============================================================================}
 {Mouse Helper Functions}
-function MouseGetCount:LongWord; inline;
+function MouseGetCount:LongWord;
 
 function MouseDeviceCheck(Mouse:PMouseDevice):PMouseDevice;
 
 function MouseDeviceTypeToString(MouseType:LongWord):String;
 function MouseDeviceStateToString(MouseState:LongWord):String;
 
+function MouseDeviceRotationToString(Rotation:LongWord):String;
+
 function MouseDeviceStateToNotification(State:LongWord):LongWord;
+
+function MouseDeviceResolveRotation(ARotation:LongWord):LongWord;
 
 function MouseInsertData(Mouse:PMouseDevice;Data:PMouseData;Signal:Boolean):LongWord;
 
@@ -372,15 +376,6 @@ procedure MouseLogInfo(Mouse:PMouseDevice;const AText:String); inline;
 procedure MouseLogWarn(Mouse:PMouseDevice;const AText:String); inline;
 procedure MouseLogError(Mouse:PMouseDevice;const AText:String); inline;
 procedure MouseLogDebug(Mouse:PMouseDevice;const AText:String); inline;
-
-{==============================================================================}
-{USB Mouse Helper Functions}
-function USBMouseCheckDevice(Device:PUSBDevice):Boolean;
-
-function USBMouseDeviceSetProtocol(Mouse:PUSBMouseDevice;Protocol:Byte):LongWord;
-
-function USBMouseDeviceGetHIDDescriptor(Mouse:PUSBMouseDevice;Descriptor:PUSBHIDDescriptor):LongWord;
-function USBMouseDeviceGetReportDescriptor(Mouse:PUSBMouseDevice;Descriptor:Pointer;Size:LongWord):LongWord;
 
 {==============================================================================}
 {==============================================================================}
@@ -399,18 +394,16 @@ var
 
  MouseBuffer:PMouseBuffer;                             {Global mouse input buffer}
  MouseBufferLock:TMutexHandle = INVALID_HANDLE_VALUE;  {Global mouse buffer lock}
- 
+
 {==============================================================================}
 {==============================================================================}
-var
- {USB Mouse specific variables}
- USBMouseDriver:PUSBDriver;  {USB Mouse Driver interface (Set by MouseInit)}
+{Forward Declarations}
 
 {==============================================================================}
 {==============================================================================}
 {Initialization Functions}
 procedure MouseInit;
-{Initialize the mouse unit, device table and USB mouse driver}
+{Initialize the mouse unit and device table}
 
 {Note: Called only during system startup}
 var
@@ -453,35 +446,6 @@ begin
    if MouseBufferLock = INVALID_HANDLE_VALUE then
     begin
      if MOUSE_LOG_ENABLED then MouseLogError(nil,'Failed to create mouse buffer lock');
-    end;
-  end;  
- 
- {Create USB Mouse Driver}
- if USB_MOUSE_REGISTER_DRIVER then
-  begin
-   USBMouseDriver:=USBDriverCreate;
-   if USBMouseDriver <> nil then
-    begin
-     {Update USB Mouse Driver}
-     {Driver}
-     USBMouseDriver.Driver.DriverName:=USBMOUSE_DRIVER_NAME; 
-     {USB}
-     USBMouseDriver.DriverBind:=USBMouseDriverBind;
-     USBMouseDriver.DriverUnbind:=USBMouseDriverUnbind;
-     
-     {Register USB Mouse Driver}
-     Status:=USBDriverRegister(USBMouseDriver);
-     if Status <> USB_STATUS_SUCCESS then
-      begin
-       if USB_LOG_ENABLED then USBLogError(nil,'Mouse: Failed to register USB mouse driver: ' + USBStatusToString(Status));
-
-       {Destroy Driver}
-       USBDriverDestroy(USBMouseDriver);
-      end;
-    end
-   else
-    begin
-     if MOUSE_LOG_ENABLED then MouseLogError(nil,'Failed to create USB mouse driver');
     end;
   end;  
  
@@ -863,10 +827,58 @@ begin
    {$ENDIF}
   end; 
 end;
- 
+
 {==============================================================================}
 
-function MouseDeviceControl(Mouse:PMouseDevice;Request:Integer;Argument1:LongWord;var Argument2:LongWord):LongWord;
+function MouseDeviceUpdate(Mouse:PMouseDevice):LongWord;
+{Request the specified mouse device to update the current configuration}
+{Mouse: The mouse device to update}
+{Return: ERROR_SUCCESS if completed or another error code on failure}
+{Note: Items updated can include rotation, maximum X, Y and wheel and flags (If supported)}
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {Check Mouse}
+ if Mouse = nil then Exit;
+ if Mouse.Device.Signature <> DEVICE_SIGNATURE then Exit;
+
+ {Check Method}
+ if Assigned(Mouse.DeviceUpdate) then
+  begin
+   {Provided Method}
+   Result:=Mouse.DeviceUpdate(Mouse);
+  end
+ else
+  begin 
+   {Default Method}
+   {Check Mouse Attached}
+   if Mouse.MouseState <> MOUSE_STATE_ATTACHED then Exit;
+
+   {Acquire the Lock}
+   if MutexLock(Mouse.Lock) = ERROR_SUCCESS then
+    begin
+     try
+      {Nothing by default}
+
+      {Return Result}
+      Result:=ERROR_SUCCESS;
+     finally
+      {Release the Lock}
+      MutexUnlock(Mouse.Lock);
+     end;
+    end
+   else
+    begin
+     Result:=ERROR_CAN_NOT_COMPLETE;
+     Exit;
+    end;
+  end; 
+end;
+
+{==============================================================================}
+
+function MouseDeviceControl(Mouse:PMouseDevice;Request:Integer;Argument1:PtrUInt;var Argument2:PtrUInt):LongWord;
 {Perform a control request on the specified mouse device}
 {Mouse: The mouse device to control}
 {Request: The request code for the operation (eg MOUSE_CONTROL_GET_FLAG)}
@@ -900,10 +912,10 @@ begin
       case Request of
        MOUSE_CONTROL_GET_FLAG:begin
          {Get Flag}
-         LongBool(Argument2):=False;
+         Argument2:=Ord(False);
          if (Mouse.Device.DeviceFlags and Argument1) <> 0 then
           begin
-           LongBool(Argument2):=True;
+           Argument2:=Ord(True);
            
            {Return Result}
            Result:=ERROR_SUCCESS;
@@ -914,9 +926,10 @@ begin
          if (Argument1 and not(MOUSE_FLAG_MASK)) = 0 then
           begin
            Mouse.Device.DeviceFlags:=(Mouse.Device.DeviceFlags or Argument1);
+           Mouse.Properties.Flags:=Mouse.Device.DeviceFlags;
          
-           {Return Result}
-           Result:=ERROR_SUCCESS;
+           {Request Update}
+           Result:=MouseDeviceUpdate(Mouse);
           end; 
         end;
        MOUSE_CONTROL_CLEAR_FLAG:begin 
@@ -924,9 +937,10 @@ begin
          if (Argument1 and not(MOUSE_FLAG_MASK)) = 0 then
           begin
            Mouse.Device.DeviceFlags:=(Mouse.Device.DeviceFlags and not(Argument1));
+           Mouse.Properties.Flags:=Mouse.Device.DeviceFlags;
          
-           {Return Result}
-           Result:=ERROR_SUCCESS;
+           {Request Update}
+           Result:=MouseDeviceUpdate(Mouse);
           end; 
         end;
        MOUSE_CONTROL_FLUSH_BUFFER:begin
@@ -968,47 +982,103 @@ begin
         end;       
        MOUSE_CONTROL_GET_MAX_X:begin
          {Get Maximum X}
-         Argument2:=0;
+         Argument2:=Mouse.Properties.MaxX;
          
          {Return Result}
          Result:=ERROR_SUCCESS;
         end;       
        MOUSE_CONTROL_GET_MAX_Y:begin
          {Get Maximum Y}
-         Argument2:=0;
+         Argument2:=Mouse.Properties.MaxY;
          
          {Return Result}
          Result:=ERROR_SUCCESS;
         end;       
        MOUSE_CONTROL_GET_MAX_WHEEL:begin
          {Get Maximum Wheel}
-         Argument2:=0;
+         Argument2:=Mouse.Properties.MaxWheel;
          
          {Return Result}
          Result:=ERROR_SUCCESS;
         end;       
        MOUSE_CONTROL_GET_MAX_BUTTONS:begin
          {Get Maximum Buttons mask}
-         Argument2:=MOUSE_LEFT_BUTTON or MOUSE_RIGHT_BUTTON;
+         Argument2:=Mouse.Properties.MaxButtons;
          
          {Return Result}
          Result:=ERROR_SUCCESS;
         end;       
        MOUSE_CONTROL_GET_ROTATION:begin
          {Get Rotation}
-         Argument2:=MOUSE_ROTATION_0;
+         Argument2:=Mouse.Properties.Rotation;
          
          {Return Result}
          Result:=ERROR_SUCCESS;
         end;
        MOUSE_CONTROL_SET_ROTATION:begin
          {Set Rotation}
-         {Not Supported}
-         
-         {Return Result}
-         Result:=ERROR_NOT_SUPPORTED;
+         case MouseDeviceResolveRotation(Argument1) of
+          MOUSE_ROTATION_0,MOUSE_ROTATION_90,MOUSE_ROTATION_180,MOUSE_ROTATION_270:begin
+            Mouse.Properties.Rotation:=Argument1;
+
+            {Request Update}
+            Result:=MouseDeviceUpdate(Mouse);
+           end;
+         end;
         end;
       end;
+     finally
+      {Release the Lock}
+      MutexUnlock(Mouse.Lock);
+     end;
+    end
+   else
+    begin
+     Result:=ERROR_CAN_NOT_COMPLETE;
+     Exit;
+    end;
+  end; 
+end;
+
+{==============================================================================}
+
+function MouseDeviceGetProperties(Mouse:PMouseDevice;Properties:PMouseProperties):LongWord;
+{Get the properties for the specified mouse device}
+{Mouse: The mouse device to get properties from}
+{Properties: Pointer to a TMouseProperties structure to fill in}
+{Return: ERROR_SUCCESS if completed or another error code on failure}
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {Check Properties}
+ if Properties = nil then Exit;
+
+ {Check Mouse}
+ if Mouse = nil then Exit;
+ if Mouse.Device.Signature <> DEVICE_SIGNATURE then Exit;
+
+ {Check Method}
+ if Assigned(Mouse.DeviceGetProperties) then
+  begin
+   {Provided Method}
+   Result:=Mouse.DeviceGetProperties(Mouse,Properties);
+  end
+ else
+  begin 
+   {Default Method}
+   {Check Mouse Attached}
+   {if Mouse.MouseState <> MOUSE_STATE_ATTACHED then Exit;} {Allow when attaching}
+
+   {Acquire the Lock}
+   if MutexLock(Mouse.Lock) = ERROR_SUCCESS then
+    begin
+     try
+      {Get Properties}
+      System.Move(Mouse.Properties,Properties^,SizeOf(TMouseProperties));
+
+      {Return Result}
+      Result:=ERROR_SUCCESS;
      finally
       {Release the Lock}
       MutexUnlock(Mouse.Lock);
@@ -1110,15 +1180,25 @@ begin
  Result.MouseState:=MOUSE_STATE_DETACHED;
  Result.MouseRate:=MOUSE_SAMPLE_RATE;
  Result.DeviceRead:=nil;
+ Result.DeviceUpdate:=nil;
  Result.DeviceControl:=nil;
+ Result.DeviceGetProperties:=nil;
  Result.Lock:=INVALID_HANDLE_VALUE;
  Result.Buffer.Wait:=INVALID_HANDLE_VALUE;
  
  {Check Defaults}
  if MOUSE_SWAP_BUTTONS_DEFAULT then Result.Device.DeviceFlags:=Result.Device.DeviceFlags or MOUSE_FLAG_SWAP_BUTTONS;
+
+ {Update Properties}
+ Result.Properties.Flags:=Result.Device.DeviceFlags;
+ Result.Properties.Rotation:=MOUSE_ROTATION_0;
+ Result.Properties.MaxX:=0;
+ Result.Properties.MaxY:=0;
+ Result.Properties.MaxWheel:=0;
+ Result.Properties.MaxButtons:=MOUSE_LEFT_BUTTON or MOUSE_RIGHT_BUTTON;
  
  {Create Lock}
- Result.Lock:=MutexCreate;
+ Result.Lock:=MutexCreateEx(False,MUTEX_DEFAULT_SPINCOUNT,MUTEX_FLAG_RECURSIVE);
  if Result.Lock = INVALID_HANDLE_VALUE then
   begin
    if MOUSE_LOG_ENABLED then MouseLogError(nil,'Failed to create lock for mouse');
@@ -1504,864 +1584,11 @@ begin
    Buttons:=0;
   end; 
 end;
-
-{==============================================================================}
-{==============================================================================}
-{USB Mouse Functions}
-function USBMouseDeviceRead(Mouse:PMouseDevice;Buffer:Pointer;Size:LongWord;var Count:LongWord):LongWord; 
-{Implementation of MouseDeviceRead API for USB Mouse}
-{Note: Not intended to be called directly by applications, use MouseDeviceRead instead}
-var
- Offset:PtrUInt;
-begin
- {}
- Result:=ERROR_INVALID_PARAMETER;
- 
- {Check Mouse}
- if Mouse = nil then Exit;
- if Mouse.Device.Signature <> DEVICE_SIGNATURE then Exit;
- 
- {Check Buffer}
- if Buffer = nil then Exit;
- 
- {Check Size}
- if Size < SizeOf(TMouseData) then Exit;
- 
- {Check Mouse Attached}
- if Mouse.MouseState <> MOUSE_STATE_ATTACHED then Exit;
- 
- {$IFDEF MOUSE_DEBUG}
- if MOUSE_LOG_ENABLED then MouseLogDebug(Mouse,'Attempting to read ' + IntToStr(Size) + ' bytes from mouse');
- {$ENDIF}
- 
- {Read to Buffer}
- Count:=0;
- Offset:=0;
- while Size >= SizeOf(TMouseData) do
-  begin
-   {Check Non Blocking}
-   if ((Mouse.Device.DeviceFlags and MOUSE_FLAG_NON_BLOCK) <> 0) and (Mouse.Buffer.Count = 0) then
-    begin
-     if Count = 0 then Result:=ERROR_NO_MORE_ITEMS;
-     Break;
-    end;
-
-   {Wait for Mouse Data}
-   if SemaphoreWait(Mouse.Buffer.Wait) = ERROR_SUCCESS then
-    begin
-     {Acquire the Lock}
-     if MutexLock(Mouse.Lock) = ERROR_SUCCESS then
-      begin
-       try
-        {Copy Data}
-        PMouseData(PtrUInt(Buffer) + Offset)^:=Mouse.Buffer.Buffer[Mouse.Buffer.Start];
-          
-        {Update Start}
-        Mouse.Buffer.Start:=(Mouse.Buffer.Start + 1) mod MOUSE_BUFFER_SIZE;
-        
-        {Update Count}
-        Dec(Mouse.Buffer.Count);
-  
-        {Update Count}
-        Inc(Count);
-          
-        {Update Size and Offset}
-        Dec(Size,SizeOf(TMouseData));
-        Inc(Offset,SizeOf(TMouseData));
-       finally
-        {Release the Lock}
-        MutexUnlock(Mouse.Lock);
-       end;
-      end
-     else
-      begin
-       Result:=ERROR_CAN_NOT_COMPLETE;
-       Exit;
-      end;
-    end  
-   else
-    begin
-     Result:=ERROR_CAN_NOT_COMPLETE;
-     Exit;
-    end;
-   
-   {Return Result}
-   Result:=ERROR_SUCCESS;
-  end;
-  
- {$IFDEF MOUSE_DEBUG}
- if MOUSE_LOG_ENABLED then MouseLogDebug(Mouse,'Return count=' + IntToStr(Count));
- {$ENDIF}
-end;
- 
-{==============================================================================}
-
-function USBMouseDeviceControl(Mouse:PMouseDevice;Request:Integer;Argument1:LongWord;var Argument2:LongWord):LongWord;
-{Implementation of MouseDeviceControl API for USB Mouse}
-{Note: Not intended to be called directly by applications, use MouseDeviceControl instead}
-begin
- {}
- Result:=ERROR_INVALID_PARAMETER;
- 
- {Check Mouse}
- if Mouse = nil then Exit;
- if Mouse.Device.Signature <> DEVICE_SIGNATURE then Exit; 
- 
- {Check Mouse Attached}
- if Mouse.MouseState <> MOUSE_STATE_ATTACHED then Exit;
- 
- {Acquire the Lock}
- if MutexLock(Mouse.Lock) = ERROR_SUCCESS then
-  begin
-   try
-    case Request of
-     MOUSE_CONTROL_GET_FLAG:begin
-       {Get Flag}
-       LongBool(Argument2):=False;
-       if (Mouse.Device.DeviceFlags and Argument1) <> 0 then
-        begin
-         LongBool(Argument2):=True;
-         
-         {Return Result}
-         Result:=ERROR_SUCCESS;
-        end;
-      end;
-     MOUSE_CONTROL_SET_FLAG:begin 
-       {Set Flag}
-       if (Argument1 and not(MOUSE_FLAG_MASK)) = 0 then
-        begin
-         Mouse.Device.DeviceFlags:=(Mouse.Device.DeviceFlags or Argument1);
-       
-         {Return Result}
-         Result:=ERROR_SUCCESS;
-        end; 
-      end;
-     MOUSE_CONTROL_CLEAR_FLAG:begin 
-       {Clear Flag}
-       if (Argument1 and not(MOUSE_FLAG_MASK)) = 0 then
-        begin
-         Mouse.Device.DeviceFlags:=(Mouse.Device.DeviceFlags and not(Argument1));
-       
-         {Return Result}
-         Result:=ERROR_SUCCESS;
-        end; 
-      end;
-     MOUSE_CONTROL_FLUSH_BUFFER:begin
-       {Flush Buffer}
-       while Mouse.Buffer.Count > 0 do 
-        begin
-         {Wait for Data (Should not Block)}
-         if SemaphoreWait(Mouse.Buffer.Wait) = ERROR_SUCCESS then
-          begin
-           {Update Start}
-           Mouse.Buffer.Start:=(Mouse.Buffer.Start + 1) mod MOUSE_BUFFER_SIZE;
-           
-           {Update Count}
-           Dec(Mouse.Buffer.Count);
-          end
-         else
-          begin
-           Result:=ERROR_CAN_NOT_COMPLETE;
-           Exit;
-          end;
-        end;
-        
-       {Return Result} 
-       Result:=ERROR_SUCCESS;
-      end;       
-     MOUSE_CONTROL_GET_SAMPLE_RATE:begin
-       {Get Sample Rate}
-       Argument2:=Mouse.MouseRate;
-       
-       {Return Result}
-       Result:=ERROR_SUCCESS;
-      end;
-     MOUSE_CONTROL_SET_SAMPLE_RATE:begin
-       {Set Sample Rate}
-       Mouse.MouseRate:=Argument1;
-       
-       {Return Result}
-       Result:=ERROR_SUCCESS;
-      end;       
-     MOUSE_CONTROL_GET_MAX_X:begin
-       {Get Maximum X}
-       Argument2:=0;
-       
-       {Return Result}
-       Result:=ERROR_SUCCESS;
-      end;       
-     MOUSE_CONTROL_GET_MAX_Y:begin
-       {Get Maximum Y}
-       Argument2:=0;
-       
-       {Return Result}
-       Result:=ERROR_SUCCESS;
-      end;       
-     MOUSE_CONTROL_GET_MAX_WHEEL:begin
-       {Get Maximum Wheel}
-       Argument2:=0;
-       
-       {Return Result}
-       Result:=ERROR_SUCCESS;
-      end;       
-     MOUSE_CONTROL_GET_MAX_BUTTONS:begin
-       {Get Maximum Buttons mask}
-       Argument2:=MOUSE_LEFT_BUTTON or MOUSE_RIGHT_BUTTON or MOUSE_MIDDLE_BUTTON;
-       
-       {Return Result}
-       Result:=ERROR_SUCCESS;
-      end;       
-     MOUSE_CONTROL_GET_ROTATION:begin
-       {Get Rotation}
-       Argument2:=MOUSE_ROTATION_0;
-       
-       {Return Result}
-       Result:=ERROR_SUCCESS;
-      end;
-     MOUSE_CONTROL_SET_ROTATION:begin
-       {Set Rotation}
-       {Not Supported}
-       
-       {Return Result}
-       Result:=ERROR_NOT_SUPPORTED;
-      end;
-    end;
-   finally
-    {Release the Lock}
-    MutexUnlock(Mouse.Lock);
-   end;
-  end
- else
-  begin
-   Result:=ERROR_CAN_NOT_COMPLETE;
-   Exit;
-  end;
-end;
- 
-{==============================================================================}
- 
-function USBMouseDriverBind(Device:PUSBDevice;Interrface:PUSBInterface):LongWord;
-{Bind the Mouse driver to a USB device if it is suitable}
-{Device: The USB device to attempt to bind to}
-{Interrface: The USB interface to attempt to bind to (or nil for whole device)}
-{Return: USB_STATUS_SUCCESS if completed, USB_STATUS_DEVICE_UNSUPPORTED if unsupported or another error code on failure}
-var
- Status:LongWord;
- Interval:LongWord;
- Mouse:PUSBMouseDevice;
- ReportEndpoint:PUSBEndpointDescriptor;
-begin
- {}
- Result:=USB_STATUS_INVALID_PARAMETER;
- 
- {Check Device}
- if Device = nil then Exit;
-                        
- {$IFDEF USB_DEBUG}                       
- if USB_LOG_ENABLED then USBLogDebug(Device,'Mouse: Attempting to bind USB device (Manufacturer=' + Device.Manufacturer + ' Product=' + Device.Product + ' Address=' + IntToStr(Device.Address) + ')');
- {$ENDIF}
- 
- {Check Interface (Bind to interface only)}
- if Interrface = nil then
-  begin
-   {Return Result}
-   Result:=USB_STATUS_DEVICE_UNSUPPORTED;
-   Exit;
-  end;
- 
- {Check Device}
- if not USBMouseCheckDevice(Device) then
-  begin
-   {Return Result}
-   Result:=USB_STATUS_DEVICE_UNSUPPORTED;
-   Exit;   
-  end;
-  
- {Check Interface (Must be HID boot protocol mouse)}
- if (Interrface.Descriptor.bInterfaceClass <> USB_CLASS_CODE_HID) or (Interrface.Descriptor.bInterfaceSubClass <> USB_HID_SUBCLASS_BOOT) or (Interrface.Descriptor.bInterfaceProtocol <> USB_HID_BOOT_PROTOCOL_MOUSE) then
-  begin
-   {Return Result}
-   Result:=USB_STATUS_DEVICE_UNSUPPORTED;
-   Exit;   
-  end;
- 
- {Check Endpoint (Must be IN interrupt)}
- ReportEndpoint:=USBDeviceFindEndpointByType(Device,Interrface,USB_DIRECTION_IN,USB_TRANSFER_TYPE_INTERRUPT);
- if ReportEndpoint = nil then
-  begin
-   {Return Result}
-   Result:=USB_STATUS_DEVICE_UNSUPPORTED;
-   Exit;
-  end;
- 
- {Create Mouse}
- Mouse:=PUSBMouseDevice(MouseDeviceCreateEx(SizeOf(TUSBMouseDevice)));
- if Mouse = nil then
-  begin
-   if USB_LOG_ENABLED then USBLogError(Device,'Mouse: Failed to create new mouse device');
-   
-   {Return Result}
-   Result:=USB_STATUS_DEVICE_UNSUPPORTED;
-   Exit;
-  end;
- 
- {Update Mouse} 
- {Device}
- Mouse.Mouse.Device.DeviceBus:=DEVICE_BUS_USB;
- Mouse.Mouse.Device.DeviceType:=MOUSE_TYPE_USB;
- Mouse.Mouse.Device.DeviceFlags:=Mouse.Mouse.Device.DeviceFlags; {Don't override defaults (was MOUSE_FLAG_NONE)}
- Mouse.Mouse.Device.DeviceData:=Device;
- Mouse.Mouse.Device.DeviceDescription:=USBMOUSE_MOUSE_DESCRIPTION;
- {Mouse}
- Mouse.Mouse.MouseState:=MOUSE_STATE_ATTACHING;
- Mouse.Mouse.DeviceRead:=USBMouseDeviceRead;
- Mouse.Mouse.DeviceControl:=USBMouseDeviceControl;
- {Driver}
- {USB}
- Mouse.HIDInterface:=Interrface;
- Mouse.ReportEndpoint:=ReportEndpoint;
- Mouse.WaiterThread:=INVALID_HANDLE_VALUE;
- 
- {Allocate Report Request}
- Mouse.ReportRequest:=USBRequestAllocate(Device,ReportEndpoint,USBMouseReportComplete,USB_HID_BOOT_DATA_SIZE,Mouse);
- if Mouse.ReportRequest = nil then
-  begin
-   if USB_LOG_ENABLED then USBLogError(Device,'Mouse: Failed to allocate USB report request for mouse');
-
-   {Destroy Mouse}
-   MouseDeviceDestroy(@Mouse.Mouse);
-
-   {Return Result}
-   Result:=USB_STATUS_DEVICE_UNSUPPORTED;
-   Exit;
-  end;
-
- {Register Mouse} 
- if MouseDeviceRegister(@Mouse.Mouse) <> ERROR_SUCCESS then
-  begin
-   if USB_LOG_ENABLED then USBLogError(Device,'Mouse: Failed to register new mouse device');
-   
-   {Release Report Request}
-   USBRequestRelease(Mouse.ReportRequest);
-   
-   {Destroy Mouse}
-   MouseDeviceDestroy(@Mouse.Mouse);
-   
-   {Return Result}
-   Result:=USB_STATUS_DEVICE_UNSUPPORTED;
-   Exit;
-  end;
- 
- {$IFDEF USB_DEBUG}
- if USB_LOG_ENABLED then USBLogDebug(Device,'Mouse: Reading HID report descriptors');
- {$ENDIF}
- 
- {Get HID Descriptor}
- Mouse.HIDDescriptor:=USBBufferAllocate(Device,SizeOf(TUSBHIDDescriptor));
- if Mouse.HIDDescriptor <> nil then
-  begin 
-   Status:=USBMouseDeviceGetHIDDescriptor(Mouse,Mouse.HIDDescriptor);
-   if Status <> USB_STATUS_SUCCESS then
-    begin
-     if USB_LOG_ENABLED then USBLogError(Device,'Mouse: Failed to read HID descriptor: ' + USBStatusToString(Status));
-     
-     {Don't fail the bind}
-    end
-   else 
-    begin
-     if (Mouse.HIDDescriptor.bDescriptorType = USB_HID_DESCRIPTOR_TYPE_HID) and (Mouse.HIDDescriptor.bHIDDescriptorType = USB_HID_DESCRIPTOR_TYPE_REPORT) then
-      begin
-       {Get Report Descriptor}
-       Mouse.ReportDescriptor:=USBBufferAllocate(Device,Mouse.HIDDescriptor.wHIDDescriptorLength); 
-       if Mouse.ReportDescriptor <> nil then
-        begin
-         Status:=USBMouseDeviceGetReportDescriptor(Mouse,Mouse.ReportDescriptor,Mouse.HIDDescriptor.wHIDDescriptorLength);
-         if Status <> USB_STATUS_SUCCESS then
-          begin
-           if USB_LOG_ENABLED then USBLogError(Device,'Mouse: Failed to read HID report descriptor: ' + USBStatusToString(Status));
-           
-           {Don't fail the bind}
-         {$IFDEF USB_DEBUG}
-          end
-         else
-          begin
-           if USB_LOG_ENABLED then USBLogDebug(Device,'Mouse: Read ' + IntToStr(Mouse.HIDDescriptor.wHIDDescriptorLength) + ' byte HID report descriptor');
-         {$ENDIF}  
-          end;
-        end;
-      end;
-    end;
-  end;  
- 
- {$IFDEF USB_DEBUG}
- if USB_LOG_ENABLED then USBLogDebug(Device,'Mouse: Enabling HID boot protocol');
- {$ENDIF}
-
- {Set Boot Protocol}
- Status:=USBMouseDeviceSetProtocol(Mouse,USB_HID_PROTOCOL_BOOT);
- if Status <> USB_STATUS_SUCCESS then
-  begin
-   if USB_LOG_ENABLED then USBLogError(Device,'Mouse: Failed to enable HID boot protocol: ' + USBStatusToString(Status));
-
-   {Release Report Request}
-   USBRequestRelease(Mouse.ReportRequest);
-   
-   {Release HID Descriptor}
-   USBBufferRelease(Mouse.HIDDescriptor);
- 
-   {Release Report Descriptor}
-   USBBufferRelease(Mouse.ReportDescriptor);
-   
-   {Deregister Mouse}
-   MouseDeviceDeregister(@Mouse.Mouse);
-   
-   {Destroy Mouse}
-   MouseDeviceDestroy(@Mouse.Mouse);
-   
-   {Return Result}
-   Result:=USB_STATUS_DEVICE_UNSUPPORTED;
-   Exit;
-  end;
-  
- {Check Endpoint Interval}
- if USB_MOUSE_POLLING_INTERVAL > 0 then
-  begin
-   {Check Device Speed}
-   if Device.Speed = USB_SPEED_HIGH then
-    begin
-     {Get Interval}
-     Interval:=FirstBitSet(USB_MOUSE_POLLING_INTERVAL * USB_UFRAMES_PER_MS) + 1;
-     
-     {Ensure no less than Interval} {Milliseconds = (1 shl (bInterval - 1)) div USB_UFRAMES_PER_MS}
-     if ReportEndpoint.bInterval < Interval then ReportEndpoint.bInterval:=Interval;
-    end
-   else
-    begin
-     {Ensure no less than USB_MOUSE_POLLING_INTERVAL} {Milliseconds = bInterval div USB_FRAMES_PER_MS}
-     if ReportEndpoint.bInterval < USB_MOUSE_POLLING_INTERVAL then ReportEndpoint.bInterval:=USB_MOUSE_POLLING_INTERVAL;
-    end;  
-  end;  
-  
- {Update Interface}
- Interrface.DriverData:=Mouse;
- 
- {Update Pending}
- Inc(Mouse.PendingCount);
- 
- {$IFDEF USB_DEBUG}
- if USB_LOG_ENABLED then USBLogDebug(Device,'Mouse: Submitting report request');
- {$ENDIF}
- 
- {Submit Request}
- Status:=USBRequestSubmit(Mouse.ReportRequest);
- if Status <> USB_STATUS_SUCCESS then
-  begin
-   if USB_LOG_ENABLED then USBLogError(Device,'Mouse: Failed to submit report request: ' + USBStatusToString(Status));
-   
-   {Update Pending}
-   Dec(Mouse.PendingCount);
-   
-   {Release Report Request}
-   USBRequestRelease(Mouse.ReportRequest);
-   
-   {Release HID Descriptor}
-   USBBufferRelease(Mouse.HIDDescriptor);
- 
-   {Release Report Descriptor}
-   USBBufferRelease(Mouse.ReportDescriptor);
-   
-   {Deregister Mouse}
-   MouseDeviceDeregister(@Mouse.Mouse);
-   
-   {Destroy Mouse}
-   MouseDeviceDestroy(@Mouse.Mouse);
-   
-   {Return Result}
-   Result:=Status;
-   Exit;
-  end;  
- 
- {Set State to Attached}
- if MouseDeviceSetState(@Mouse.Mouse,MOUSE_STATE_ATTACHED) <> ERROR_SUCCESS then Exit;
- 
- {Return Result}
- Result:=USB_STATUS_SUCCESS;
-end;
- 
-{==============================================================================}
- 
-function USBMouseDriverUnbind(Device:PUSBDevice;Interrface:PUSBInterface):LongWord;
-{Unbind the Mouse driver from a USB device}
-{Device: The USB device to unbind from}
-{Interrface: The USB interface to unbind from (or nil for whole device)}
-{Return: USB_STATUS_SUCCESS if completed or another error code on failure}
-var
- Message:TMessage;
- Mouse:PUSBMouseDevice;
-begin
- {}
- Result:=USB_STATUS_INVALID_PARAMETER;
- 
- {Check Device}
- if Device = nil then Exit;
-
- {Check Interface}
- if Interrface = nil then Exit;
- 
- {Check Driver}
- if Interrface.Driver <> USBMouseDriver then Exit;
- 
- {$IFDEF USB_DEBUG}
- if USB_LOG_ENABLED then USBLogDebug(Device,'Mouse: Unbinding USB device (Manufacturer=' + Device.Manufacturer + ' Product=' + Device.Product + ' Address=' + IntToStr(Device.Address) + ')');
- {$ENDIF}
- 
- {Get Mouse}
- Mouse:=PUSBMouseDevice(Interrface.DriverData);
- if Mouse = nil then Exit;
- if Mouse.Mouse.Device.Signature <> DEVICE_SIGNATURE then Exit;
- 
- {Set State to Detaching}
- Result:=USB_STATUS_OPERATION_FAILED;
- if MouseDeviceSetState(@Mouse.Mouse,MOUSE_STATE_DETACHING) <> ERROR_SUCCESS then Exit;
-
- {Acquire the Lock}
- if MutexLock(Mouse.Mouse.Lock) <> ERROR_SUCCESS then Exit;
- 
- {Cancel Report Request}
- USBRequestCancel(Mouse.ReportRequest);
- 
- {Check Pending}
- if Mouse.PendingCount <> 0 then
-  begin
-   {$IFDEF USB_DEBUG}
-   if USB_LOG_ENABLED then USBLogDebug(Device,'Mouse: Waiting for ' + IntToStr(Mouse.PendingCount) + ' pending requests to complete');
-   {$ENDIF}
-  
-   {Wait for Pending}
-   
-   {Setup Waiter}
-   Mouse.WaiterThread:=GetCurrentThreadId; 
-   
-   {Release the Lock}
-   MutexUnlock(Mouse.Mouse.Lock);
-   
-   {Wait for Message}
-   ThreadReceiveMessage(Message); 
-  end
- else
-  begin
-   {Release the Lock}
-   MutexUnlock(Mouse.Mouse.Lock);
-  end;  
- 
- {Set State to Detached}
- if MouseDeviceSetState(@Mouse.Mouse,MOUSE_STATE_DETACHED) <> ERROR_SUCCESS then Exit;
- 
- {Update Interface}
- Interrface.DriverData:=nil; 
-
- {Release Report Request}
- USBRequestRelease(Mouse.ReportRequest);
-
- {Release HID Descriptor}
- USBBufferRelease(Mouse.HIDDescriptor);
- 
- {Release Report Descriptor}
- USBBufferRelease(Mouse.ReportDescriptor);
- 
- {Deregister Mouse}
- if MouseDeviceDeregister(@Mouse.Mouse) <> ERROR_SUCCESS then Exit;
- 
- {Destroy Mouse}
- MouseDeviceDestroy(@Mouse.Mouse);
- 
- {Return Result}
- Result:=USB_STATUS_SUCCESS;
-end;
- 
-{==============================================================================}
-
-procedure USBMouseReportWorker(Request:PUSBRequest); 
-{Called (by a Worker thread) to process a completed USB request from a USB mouse IN interrupt endpoint}
-{Request: The USB request which has completed}
-var
- Buffer:Pointer;
- Data:PMouseData;
- Status:LongWord;
- Message:TMessage;
- Mouse:PUSBMouseDevice;
-begin
- {}
- {Check Request}
- if Request = nil then Exit;
-
- {Get Mouse}
- Mouse:=PUSBMouseDevice(Request.DriverData);
- if Mouse <> nil then
-  begin
-   {Acquire the Lock}
-   if MutexLock(Mouse.Mouse.Lock) = ERROR_SUCCESS then
-    begin
-     try
-      {Update Statistics}
-      Inc(Mouse.Mouse.ReceiveCount); 
-      
-      {Check State}
-      if Mouse.Mouse.MouseState = MOUSE_STATE_DETACHING then
-       begin
-        {$IFDEF USB_DEBUG}
-        if USB_LOG_ENABLED then USBLogDebug(Request.Device,'Mouse: Detachment pending, setting report request status to USB_STATUS_DEVICE_DETACHED');
-        {$ENDIF}
-        
-        {Update Request}
-        Request.Status:=USB_STATUS_DEVICE_DETACHED;
-       end;
- 
-      {Check Result}
-      if (Request.Status = USB_STATUS_SUCCESS) and (Request.ActualSize >= USB_HID_BOOT_REPORT_SIZE) then  
-       begin
-        {$IFDEF USB_DEBUG}
-        if USB_LOG_ENABLED then USBLogDebug(Request.Device,'Mouse: Report received'); 
-        {$ENDIF}
-        
-        {A report was received from the USB mouse}
-        Buffer:=Request.Data;
-     
-        {Check Flags}
-        if (Mouse.Mouse.Device.DeviceFlags and MOUSE_FLAG_DIRECT_READ) = 0 then
-         begin
-          {Global Buffer}
-          {Acquire the Lock}
-          if MutexLock(MouseBufferLock) = ERROR_SUCCESS then
-           begin
-            try
-             {Check Buffer}
-             if (MouseBuffer.Count < MOUSE_BUFFER_SIZE) then
-              begin
-               Data:=@MouseBuffer.Buffer[(MouseBuffer.Start + MouseBuffer.Count) mod MOUSE_BUFFER_SIZE];
-               if Data <> nil then
-                begin
-                 {Byte 0 is the Mouse buttons}
-                 Data.Buttons:=0;
-                 if (PByte(Buffer)^ and USB_HID_BOOT_LEFT_BUTTON) <> 0 then
-                  begin
-                   {Check Flags}
-                   if (Mouse.Mouse.Device.DeviceFlags and MOUSE_FLAG_SWAP_BUTTONS) = 0 then
-                    begin
-                     Data.Buttons:=Data.Buttons or MOUSE_LEFT_BUTTON;
-                    end
-                   else
-                    begin
-                     Data.Buttons:=Data.Buttons or MOUSE_RIGHT_BUTTON;
-                    end;
-                  end; 
-                 if (PByte(Buffer)^ and USB_HID_BOOT_RIGHT_BUTTON) <> 0 then
-                  begin
-                   {Check Flags}
-                   if (Mouse.Mouse.Device.DeviceFlags and MOUSE_FLAG_SWAP_BUTTONS) = 0 then
-                    begin
-                     Data.Buttons:=Data.Buttons or MOUSE_RIGHT_BUTTON;
-                    end
-                   else
-                    begin
-                     Data.Buttons:=Data.Buttons or MOUSE_LEFT_BUTTON;
-                    end;
-                  end; 
-                 if (PByte(Buffer)^ and USB_HID_BOOT_MIDDLE_BUTTON) <> 0 then Data.Buttons:=Data.Buttons or MOUSE_MIDDLE_BUTTON;
-                 if (PByte(Buffer)^ and USB_HID_BOOT_SIDE_BUTTON) <> 0 then Data.Buttons:=Data.Buttons or MOUSE_SIDE_BUTTON;
-                 if (PByte(Buffer)^ and USB_HID_BOOT_EXTRA_BUTTON) <> 0 then Data.Buttons:=Data.Buttons or MOUSE_EXTRA_BUTTON;
-         
-                 {Byte 1 is the Mouse X offset}
-                 Data.OffsetX:=PShortInt(PtrUInt(Buffer) + 1)^;
-         
-                 {Byte 2 is the Mouse Y offset}
-                 Data.OffsetY:=PShortInt(PtrUInt(Buffer) + 2)^;
-       
-                 {Byte 3 is the Mouse Wheel offset}
-                 Data.OffsetWheel:=PShortInt(PtrUInt(Buffer) + 3)^;
-            
-                 {Maximum X, Y and Wheel}
-                 Data.MaximumX:=0;
-                 Data.MaximumY:=0;
-                 Data.MaximumWheel:=0;
-                 
-                 {Update Count}
-                 Inc(MouseBuffer.Count);
-            
-                 {Signal Data Received}
-                 SemaphoreSignal(MouseBuffer.Wait);
-                end;
-              end
-             else
-              begin
-               if USB_LOG_ENABLED then USBLogError(Request.Device,'Mouse: Buffer overflow, report discarded');
-               
-               {Update Statistics}
-               Inc(Mouse.Mouse.BufferOverruns); 
-              end;            
-            finally
-             {Release the Lock}
-             MutexUnlock(MouseBufferLock);
-            end;
-           end
-          else
-           begin
-            if USB_LOG_ENABLED then USBLogError(Request.Device,'Mouse: Failed to acquire lock on buffer');
-           end;
-         end
-        else
-         begin              
-          {Direct Buffer}
-          {Check Buffer}
-          if (Mouse.Mouse.Buffer.Count < MOUSE_BUFFER_SIZE) then
-           begin
-            Data:=@Mouse.Mouse.Buffer.Buffer[(Mouse.Mouse.Buffer.Start + Mouse.Mouse.Buffer.Count) mod MOUSE_BUFFER_SIZE];
-            if Data <> nil then
-             begin
-              {Byte 0 is the Mouse buttons}
-              Data.Buttons:=0;
-              if (PByte(Buffer)^ and USB_HID_BOOT_LEFT_BUTTON) <> 0 then
-               begin
-                {Check Flags}
-                if (Mouse.Mouse.Device.DeviceFlags and MOUSE_FLAG_SWAP_BUTTONS) = 0 then
-                 begin
-                  Data.Buttons:=Data.Buttons or MOUSE_LEFT_BUTTON;
-                 end
-                else
-                 begin
-                  Data.Buttons:=Data.Buttons or MOUSE_RIGHT_BUTTON;
-                 end;
-               end; 
-              if (PByte(Buffer)^ and USB_HID_BOOT_RIGHT_BUTTON) <> 0 then
-               begin
-                {Check Flags}
-                if (Mouse.Mouse.Device.DeviceFlags and MOUSE_FLAG_SWAP_BUTTONS) = 0 then
-                 begin
-                  Data.Buttons:=Data.Buttons or MOUSE_RIGHT_BUTTON;
-                 end
-                else
-                 begin
-                  Data.Buttons:=Data.Buttons or MOUSE_LEFT_BUTTON;
-                 end;
-               end; 
-              if (PByte(Buffer)^ and USB_HID_BOOT_MIDDLE_BUTTON) <> 0 then Data.Buttons:=Data.Buttons or MOUSE_MIDDLE_BUTTON;
-              if (PByte(Buffer)^ and USB_HID_BOOT_SIDE_BUTTON) <> 0 then Data.Buttons:=Data.Buttons or MOUSE_SIDE_BUTTON;
-              if (PByte(Buffer)^ and USB_HID_BOOT_EXTRA_BUTTON) <> 0 then Data.Buttons:=Data.Buttons or MOUSE_EXTRA_BUTTON;
-         
-              {Byte 1 is the Mouse X offset}
-              Data.OffsetX:=PShortInt(PtrUInt(Buffer) + 1)^;
-         
-              {Byte 2 is the Mouse Y offset}
-              Data.OffsetY:=PShortInt(PtrUInt(Buffer) + 2)^;
-       
-              {Byte 3 is the Mouse Wheel offset}
-              Data.OffsetWheel:=PShortInt(PtrUInt(Buffer) + 3)^;
-            
-              {Maximum X, Y and Wheel}
-              Data.MaximumX:=0;
-              Data.MaximumY:=0;
-              Data.MaximumWheel:=0;
-            
-              {Update Count}
-              Inc(Mouse.Mouse.Buffer.Count);
-            
-              {Signal Data Received}
-              SemaphoreSignal(Mouse.Mouse.Buffer.Wait);
-             end; 
-           end
-          else
-           begin
-            if USB_LOG_ENABLED then USBLogError(Request.Device,'Mouse: Buffer overflow, report discarded'); 
-
-            {Update Statistics}
-            Inc(Mouse.Mouse.BufferOverruns); 
-           end;                           
-         end;
-       end
-      else
-       begin
-        if USB_LOG_ENABLED then USBLogError(Request.Device,'Mouse: Failed report request (Status=' + USBStatusToString(Request.Status) + ', ActualSize=' + IntToStr(Request.ActualSize) + ')'); 
-        
-        {Update Statistics}
-        Inc(Mouse.Mouse.ReceiveErrors); 
-       end;       
-
-      {Update Pending}
-      Dec(Mouse.PendingCount); 
-       
-      {Check State}
-      if Mouse.Mouse.MouseState = MOUSE_STATE_DETACHING then
-       begin
-        {Check Pending}
-        if Mouse.PendingCount = 0 then
-         begin
-          {Check Waiter}
-          if Mouse.WaiterThread <> INVALID_HANDLE_VALUE then
-           begin
-            {$IFDEF USB_DEBUG}
-            if USB_LOG_ENABLED then USBLogDebug(Request.Device,'Mouse: Detachment pending, sending message to waiter thread (Thread=' + IntToHex(Mouse.WaiterThread,8) + ')');
-            {$ENDIF}
-            
-            {Send Message}
-            FillChar(Message,SizeOf(TMessage),0);
-            ThreadSendMessage(Mouse.WaiterThread,Message);
-            Mouse.WaiterThread:=INVALID_HANDLE_VALUE;
-           end; 
-         end;
-       end
-      else
-       begin      
-        {Update Pending}
-        Inc(Mouse.PendingCount);
-      
-        {$IFDEF USB_DEBUG}
-        if USB_LOG_ENABLED then USBLogDebug(Request.Device,'Mouse: Resubmitting report request');
-        {$ENDIF}
-
-        {Resubmit Request}
-        Status:=USBRequestSubmit(Request);
-        if Status <> USB_STATUS_SUCCESS then
-         begin
-          if USB_LOG_ENABLED then USBLogError(Request.Device,'Mouse: Failed to resubmit report request: ' + USBStatusToString(Status));
-   
-          {Update Pending}
-          Dec(Mouse.PendingCount);
-         end;
-       end;  
-     finally
-      {Release the Lock}
-      MutexUnlock(Mouse.Mouse.Lock);
-     end;
-    end
-   else
-    begin
-     if USB_LOG_ENABLED then USBLogError(Request.Device,'Mouse: Failed to acquire lock');
-    end;
-  end
- else
-  begin
-   if USB_LOG_ENABLED then USBLogError(Request.Device,'Mouse: Report request invalid');
-  end;    
-end;
- 
-{==============================================================================}
- 
-procedure USBMouseReportComplete(Request:PUSBRequest);
-{Called when a USB request from a USB mouse IN interrupt endpoint completes}
-{Request: The USB request which has completed}
-{Note: Request is passed to worker thread for processing to prevent blocking the USB completion}
-begin
- {}
- {Check Request}
- if Request = nil then Exit;
- 
- WorkerSchedule(0,TWorkerTask(USBMouseReportWorker),Request,nil)
-end;
  
 {==============================================================================}
 {==============================================================================}
 {Mouse Helper Functions}
-function MouseGetCount:LongWord; inline;
+function MouseGetCount:LongWord;
 {Get the current mouse count}
 begin
  {}
@@ -2435,6 +1662,22 @@ end;
 
 {==============================================================================}
 
+function MouseDeviceRotationToString(Rotation:LongWord):String;
+{Return a string describing the supplied mouse rotation value}
+begin
+ {}
+ Result:='MOUSE_ROTATION_UNKNOWN';
+ 
+ case Rotation of
+  MOUSE_ROTATION_0:Result:='MOUSE_ROTATION_0';
+  MOUSE_ROTATION_90:Result:='MOUSE_ROTATION_90';
+  MOUSE_ROTATION_180:Result:='MOUSE_ROTATION_180';
+  MOUSE_ROTATION_270:Result:='MOUSE_ROTATION_270';
+ end;
+end;
+
+{==============================================================================}
+
 function MouseDeviceStateToNotification(State:LongWord):LongWord;
 {Convert a Mouse state value into the notification code for device notifications}
 begin
@@ -2447,6 +1690,22 @@ begin
   MOUSE_STATE_DETACHING:Result:=DEVICE_NOTIFICATION_DETACHING;
   MOUSE_STATE_ATTACHING:Result:=DEVICE_NOTIFICATION_ATTACHING;
   MOUSE_STATE_ATTACHED:Result:=DEVICE_NOTIFICATION_ATTACH;
+ end;
+end;
+
+{==============================================================================}
+
+function MouseDeviceResolveRotation(ARotation:LongWord):LongWord;
+{Resolve a value of 0, 90, 180 or 270 to a mouse rotation constant (eg MOUSE_ROTATION_180)}
+{Note: Also accepts passing the mouse rotation constant values directly}
+begin
+ {}
+ case ARotation of
+  90:Result:=MOUSE_ROTATION_90;  
+  180:Result:=MOUSE_ROTATION_180;  
+  270:Result:=MOUSE_ROTATION_270;  
+  else
+   Result:=ARotation;  
  end;
 end;
 
@@ -2502,7 +1761,7 @@ begin
        end
       else
        begin
-        if MOUSE_LOG_ENABLED then MouseLogError(Mouse,'Buffer overflow, key discarded');
+        if MOUSE_LOG_ENABLED then MouseLogError(Mouse,'Buffer overflow, packet discarded');
         
         {Update Statistics}
         Inc(Mouse.BufferOverruns); 
@@ -2546,7 +1805,7 @@ begin
     end
    else
     begin
-     if MOUSE_LOG_ENABLED then MouseLogError(Mouse,'Buffer overflow, key discarded');
+     if MOUSE_LOG_ENABLED then MouseLogError(Mouse,'Buffer overflow, packet discarded');
      
      {Update Statistics}
      Inc(Mouse.BufferOverruns); 
@@ -2628,113 +1887,7 @@ end;
 
 {==============================================================================}
 {==============================================================================}
-{USB Mouse Helper Functions}
-function USBMouseCheckDevice(Device:PUSBDevice):Boolean;
-{Check if the supplied USB device is suitable for detection as a HID Mouse Device}
-{Device: The USB device to check}
-{Return: True if the device is suitable or False if it is not}
-begin
- {}
- Result:=False;
- 
- {Check Device}
- if Device = nil then Exit;
- 
- {Check Class}
- case Device.Descriptor.bDeviceClass of
-  USB_CLASS_CODE_HUB:Result:=False;
- else
-  Result:=True;
- end;
-end;
-
-{==============================================================================}
-
-function USBMouseDeviceSetProtocol(Mouse:PUSBMouseDevice;Protocol:Byte):LongWord;
-{Set the report protocol for a USB mouse device}
-{Mouse: The USB mouse device to set the report protocol for}
-{Protocol: The report protocol to set (eg USB_HID_PROTOCOL_BOOT)}
-{Return: USB_STATUS_SUCCESS if completed or another USB error code on failure}
-var
- Device:PUSBDevice;
-begin
- {}
- Result:=USB_STATUS_INVALID_PARAMETER;
- 
- {Check Mouse}
- if Mouse = nil then Exit;
- 
- {Check Interface}
- if Mouse.HIDInterface = nil then Exit;
- 
- {Get Device}
- Device:=PUSBDevice(Mouse.Mouse.Device.DeviceData);
- if Device = nil then Exit;
- 
- {Set Protocol}
- Result:=USBControlRequest(Device,nil,USB_HID_REQUEST_SET_PROTOCOL,USB_BMREQUESTTYPE_TYPE_CLASS or USB_BMREQUESTTYPE_DIR_OUT or USB_BMREQUESTTYPE_RECIPIENT_INTERFACE,Protocol,Mouse.HIDInterface.Descriptor.bInterfaceNumber,nil,0);
-end;
-
-{==============================================================================}
-
-function USBMouseDeviceGetHIDDescriptor(Mouse:PUSBMouseDevice;Descriptor:PUSBHIDDescriptor):LongWord;
-{Get the HID Descriptor for a USB mouse device}
-{Mouse: The USB mouse device to get the descriptor for}
-{Descriptor: Pointer to a USB HID Descriptor structure for the returned data}
-{Return: USB_STATUS_SUCCESS if completed or another USB error code on failure}
-var
- Device:PUSBDevice;
-begin
- {}
- Result:=USB_STATUS_INVALID_PARAMETER;
- 
- {Check Mouse}
- if Mouse = nil then Exit;
- 
- {Check Descriptor}
- if Descriptor = nil then Exit;
- 
- {Check Interface}
- if Mouse.HIDInterface = nil then Exit;
- 
- {Get Device}
- Device:=PUSBDevice(Mouse.Mouse.Device.DeviceData);
- if Device = nil then Exit;
- 
- {Get Descriptor}
- Result:=USBControlRequest(Device,nil,USB_DEVICE_REQUEST_GET_DESCRIPTOR,USB_BMREQUESTTYPE_TYPE_STANDARD or USB_BMREQUESTTYPE_DIR_IN or USB_BMREQUESTTYPE_RECIPIENT_INTERFACE,(USB_HID_DESCRIPTOR_TYPE_HID shl 8),Mouse.HIDInterface.Descriptor.bInterfaceNumber,Descriptor,SizeOf(TUSBHIDDescriptor));
-end;
-
-{==============================================================================}
-
-function USBMouseDeviceGetReportDescriptor(Mouse:PUSBMouseDevice;Descriptor:Pointer;Size:LongWord):LongWord;
-{Get the Report Descriptor for a USB mouse device}
-{Mouse: The USB mouse device to get the descriptor for}
-{Descriptor: Pointer to a buffer to return the USB Report Descriptor}
-{Size: The size in bytes of the buffer pointed to by Descriptor}
-{Return: USB_STATUS_SUCCESS if completed or another USB error code on failure}
-var
- Device:PUSBDevice;
-begin
- {}
- Result:=USB_STATUS_INVALID_PARAMETER;
- 
- {Check Mouse}
- if Mouse = nil then Exit;
- 
- {Check Descriptor}
- if Descriptor = nil then Exit;
- 
- {Check Interface}
- if Mouse.HIDInterface = nil then Exit;
- 
- {Get Device}
- Device:=PUSBDevice(Mouse.Mouse.Device.DeviceData);
- if Device = nil then Exit;
- 
- {Get Descriptor}
- Result:=USBControlRequest(Device,nil,USB_DEVICE_REQUEST_GET_DESCRIPTOR,USB_BMREQUESTTYPE_TYPE_STANDARD or USB_BMREQUESTTYPE_DIR_IN or USB_BMREQUESTTYPE_RECIPIENT_INTERFACE,(USB_HID_DESCRIPTOR_TYPE_REPORT shl 8),Mouse.HIDInterface.Descriptor.bInterfaceNumber,Descriptor,Size);
-end;
+{Mouse Internal Functions}
 
 {==============================================================================}
 {==============================================================================}

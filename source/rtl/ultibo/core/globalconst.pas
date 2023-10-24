@@ -1,7 +1,7 @@
 {
 Ultibo Global Constant Definitions.
 
-Copyright (C) 2022 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -50,12 +50,14 @@ interface
 {Global constants}
 const
  {Version constants}
- ULTIBO_RELEASE_DATE             = '5 January 2022';
+ ULTIBO_RELEASE_DATE             = '10 October 2023';
  ULTIBO_RELEASE_NAME             = 'Beetroot';
- ULTIBO_RELEASE_VERSION          = '2.1.279';
+ ULTIBO_RELEASE_VERSION          = '2.5.739';
  ULTIBO_RELEASE_VERSION_MAJOR    = 2;
- ULTIBO_RELEASE_VERSION_MINOR    = 1;
- ULTIBO_RELEASE_VERSION_REVISION = 279;
+ ULTIBO_RELEASE_VERSION_MINOR    = 5;
+ ULTIBO_RELEASE_VERSION_REVISION = 739;
+ 
+ FPC_COMPILER_VERSION = {$I %FPCVERSION%}; {The version of FPC used to compile the RTL}
  
 {==============================================================================}
 const
@@ -825,6 +827,7 @@ const
  SCAN_CODE_RIGHT_ALT               = 230; {Keyboard RightAlt}
  SCAN_CODE_RIGHT_GUI               = 231; {Keyboard Right GUI}
  {Codes 232 to 65535 Reserved}
+ SCAN_CODE_RESERVED_255            = 255; {Reserved}
  
  {Alternate names for above}
  SCAN_CODE_EXCLAMATION             = 30;  {Keyboard 1 or !}
@@ -1015,8 +1018,9 @@ const
  
 const
  {Unix/Linux time constants (Seconds since 1/1/1970)}
- UNIX_TIME_SECONDS_PER_DAY =  86400;    {60*60*24;}
- UNIX_TIME_DAYS_TO_1970    =  25569.0;  {Offset between 1899 (FreePascal) and 1970 (Unix/Linux)}
+ UNIX_TIME_MILLISECONDS_PER_DAY   =  86400000; {60*60*24*1000;}
+ UNIX_TIME_SECONDS_PER_DAY        =  86400;    {60*60*24;}
+ UNIX_TIME_DAYS_TO_1970           =  25569.0;  {Offset between 1899 (FreePascal) and 1970 (Unix/Linux)}
  
 const
  {FreePascal time constants (TDateTime starts at 30/12/1899)}
@@ -1323,52 +1327,54 @@ const
  DMA_DIR_DEV_TO_DEV = 4;
  
  {DMA DREQ ID constants (Where applicable)}
- DMA_DREQ_ID_NONE         = 0;  {No peripheral gating (memory to memory transfer)}
- DMA_DREQ_ID_UART_TX      = 1;
- DMA_DREQ_ID_UART_RX      = 2;
- DMA_DREQ_ID_SPI_TX       = 3;
- DMA_DREQ_ID_SPI_RX       = 4;
- DMA_DREQ_ID_SPI_SLAVE_TX = 5;
- DMA_DREQ_ID_SPI_SLAVE_RX = 6;
- DMA_DREQ_ID_PCM_TX       = 7;
- DMA_DREQ_ID_PCM_RX       = 8;
- DMA_DREQ_ID_PWM          = 9;
- DMA_DREQ_ID_MMC          = 10;
- DMA_DREQ_ID_SDHOST       = 11;
+ DMA_DREQ_ID_NONE          = 0;  {No peripheral gating (memory to memory transfer)}
+ DMA_DREQ_ID_UART_TX       = 1;
+ DMA_DREQ_ID_UART_RX       = 2;
+ DMA_DREQ_ID_SPI_TX        = 3;
+ DMA_DREQ_ID_SPI_RX        = 4;
+ DMA_DREQ_ID_SPI_SLAVE_TX  = 5;
+ DMA_DREQ_ID_SPI_SLAVE_RX  = 6;
+ DMA_DREQ_ID_PCM_TX        = 7;
+ DMA_DREQ_ID_PCM_RX        = 8;
+ DMA_DREQ_ID_PWM           = 9;
+ DMA_DREQ_ID_MMC           = 10;
+ DMA_DREQ_ID_SDHOST        = 11;
  {Additional and aliased constants (Where applicable)}
- DMA_DREQ_ID_UART0_TX     = DMA_DREQ_ID_UART_TX;
- DMA_DREQ_ID_UART0_RX     = DMA_DREQ_ID_UART_RX;
- DMA_DREQ_ID_UART1_TX     = 12;
- DMA_DREQ_ID_UART1_RX     = 13;
- DMA_DREQ_ID_UART2_TX     = 14;
- DMA_DREQ_ID_UART2_RX     = 15;
- DMA_DREQ_ID_UART3_TX     = 16;
- DMA_DREQ_ID_UART3_RX     = 17;
- DMA_DREQ_ID_UART4_TX     = 18;
- DMA_DREQ_ID_UART4_RX     = 19;
- DMA_DREQ_ID_UART5_TX     = 20;
- DMA_DREQ_ID_UART5_RX     = 21;
- DMA_DREQ_ID_SPI0_TX      = DMA_DREQ_ID_SPI_TX;
- DMA_DREQ_ID_SPI0_RX      = DMA_DREQ_ID_SPI_RX;
- DMA_DREQ_ID_SPI1_TX      = 22;
- DMA_DREQ_ID_SPI1_RX      = 23;
- DMA_DREQ_ID_SPI2_TX      = 24;
- DMA_DREQ_ID_SPI2_RX      = 25;
- DMA_DREQ_ID_SPI3_TX      = 26;
- DMA_DREQ_ID_SPI3_RX      = 27;
- DMA_DREQ_ID_SPI4_TX      = 28;
- DMA_DREQ_ID_SPI4_RX      = 29;
- DMA_DREQ_ID_SPI5_TX      = 30;
- DMA_DREQ_ID_SPI5_RX      = 31;
- DMA_DREQ_ID_SPI6_TX      = 32;
- DMA_DREQ_ID_SPI6_RX      = 33;
- DMA_DREQ_ID_PCM0_TX      = DMA_DREQ_ID_PCM_TX;
- DMA_DREQ_ID_PCM0_RX      = DMA_DREQ_ID_PCM_RX;
- DMA_DREQ_ID_PWM0         = DMA_DREQ_ID_PWM;
- DMA_DREQ_ID_PWM1         = 34;
- DMA_DREQ_ID_EMMC0        = DMA_DREQ_ID_MMC;
- DMA_DREQ_ID_EMMC1        = DMA_DREQ_ID_SDHOST;
- DMA_DREQ_ID_EMMC2        = 35;
+ DMA_DREQ_ID_UART0_TX      = DMA_DREQ_ID_UART_TX;
+ DMA_DREQ_ID_UART0_RX      = DMA_DREQ_ID_UART_RX;
+ DMA_DREQ_ID_UART1_TX      = 12;
+ DMA_DREQ_ID_UART1_RX      = 13;
+ DMA_DREQ_ID_UART2_TX      = 14;
+ DMA_DREQ_ID_UART2_RX      = 15;
+ DMA_DREQ_ID_UART3_TX      = 16;
+ DMA_DREQ_ID_UART3_RX      = 17;
+ DMA_DREQ_ID_UART4_TX      = 18;
+ DMA_DREQ_ID_UART4_RX      = 19;
+ DMA_DREQ_ID_UART5_TX      = 20;
+ DMA_DREQ_ID_UART5_RX      = 21;
+ DMA_DREQ_ID_SPI0_TX       = DMA_DREQ_ID_SPI_TX;
+ DMA_DREQ_ID_SPI0_RX       = DMA_DREQ_ID_SPI_RX;
+ DMA_DREQ_ID_SPI1_TX       = 22;
+ DMA_DREQ_ID_SPI1_RX       = 23;
+ DMA_DREQ_ID_SPI2_TX       = 24;
+ DMA_DREQ_ID_SPI2_RX       = 25;
+ DMA_DREQ_ID_SPI3_TX       = 26;
+ DMA_DREQ_ID_SPI3_RX       = 27;
+ DMA_DREQ_ID_SPI4_TX       = 28;
+ DMA_DREQ_ID_SPI4_RX       = 29;
+ DMA_DREQ_ID_SPI5_TX       = 30;
+ DMA_DREQ_ID_SPI5_RX       = 31;
+ DMA_DREQ_ID_SPI6_TX       = 32;
+ DMA_DREQ_ID_SPI6_RX       = 33;
+ DMA_DREQ_ID_SPI_SLAVE0_TX = DMA_DREQ_ID_SPI_SLAVE_TX;
+ DMA_DREQ_ID_SPI_SLAVE0_RX = DMA_DREQ_ID_SPI_SLAVE_RX;
+ DMA_DREQ_ID_PCM0_TX       = DMA_DREQ_ID_PCM_TX;
+ DMA_DREQ_ID_PCM0_RX       = DMA_DREQ_ID_PCM_RX;
+ DMA_DREQ_ID_PWM0          = DMA_DREQ_ID_PWM;
+ DMA_DREQ_ID_PWM1          = 34;
+ DMA_DREQ_ID_EMMC0         = DMA_DREQ_ID_MMC;
+ DMA_DREQ_ID_EMMC1         = DMA_DREQ_ID_SDHOST;
+ DMA_DREQ_ID_EMMC2         = 35;
  
 {==============================================================================}
 const
@@ -1628,7 +1634,9 @@ const
  POWER_ID_SPI7   = 36;
  POWER_ID_SPI8   = 37;
  POWER_ID_SPI9   = 38;
- 
+
+ POWER_ID_UNKNOWN = LongWord(-1);
+
 const
  {Power State constants}
  POWER_STATE_OFF   = 0;
@@ -1682,7 +1690,9 @@ const
  CLOCK_ID_SPI7    = 41;
  CLOCK_ID_SPI8    = 42;
  CLOCK_ID_SPI9    = 43;
- 
+
+ CLOCK_ID_UNKNOWN = LongWord(-1);
+
 const
  {Clock State constants}
  CLOCK_STATE_OFF   = 0;
@@ -1813,6 +1823,8 @@ const
  LOGGING_FACILITY_PCI        = 38; {PCI log messages}
  LOGGING_FACILITY_VIRTIO     = 39; {VIRTIO log messages}
  LOGGING_FACILITY_BLUETOOTH  = 40; {Bluetooth log messages}
+ LOGGING_FACILITY_JOYSTICK   = 41; {Joystick log messages}
+ LOGGING_FACILITY_HID        = 42; {HID log messages}
  
  LOGGING_FACILITY_USER       = 1000; {User log messages}
 
@@ -1855,6 +1867,7 @@ const
  HANDLE_TYPE_PIPE         = 101;
  HANDLE_TYPE_SOCKET       = 102;
  HANDLE_TYPE_DEVICE       = 103;
+ HANDLE_TYPE_FIRMWARE     = 104;
  
  HANDLE_TYPE_USER_BASE    = 1000; {Base value for user or application defined handle types}
  

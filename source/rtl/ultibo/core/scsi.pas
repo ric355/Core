@@ -1,7 +1,7 @@
 {
 Ultibo SCSI interface unit.
 
-Copyright (C) 2015 - SoftOz Pty Ltd.
+Copyright (C) 2022 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -469,7 +469,7 @@ function SCSIHostEnumerate(Callback:TSCSIHostEnumerate;Data:Pointer):LongWord;
  
 {==============================================================================}
 {SCSI Helper Functions}
-function SCSIGetCount:LongWord; inline;
+function SCSIGetCount:LongWord;
 
 function SCSIDeviceCheck(SCSI:PSCSIDevice):PSCSIDevice;
 
@@ -481,7 +481,7 @@ procedure SCSILogDebug(SCSI:PSCSIDevice;const AText:String); inline;
 
 function SCSIDeviceTypeToStorageType(DeviceType:Byte;Removable,Floppy:Boolean):LongWord;
 
-function SCSIHostGetCount:LongWord; inline;
+function SCSIHostGetCount:LongWord;
 
 function SCSIHostCheck(Host:PSCSIHost):PSCSIHost;
 
@@ -490,7 +490,7 @@ function SCSIHostCheck(Host:PSCSIHost):PSCSIHost;
 function SCSIStorageDeviceRead(Storage:PStorageDevice;const Start,Count:Int64;Buffer:Pointer):LongWord; 
 function SCSIStorageDeviceWrite(Storage:PStorageDevice;const Start,Count:Int64;Buffer:Pointer):LongWord;
 
-function SCSIStorageDeviceControl(Storage:PStorageDevice;Request:Integer;Argument1,Argument2:LongWord):LongWord;
+function SCSIStorageDeviceControl(Storage:PStorageDevice;Request:Integer;Argument1:PtrUInt;var Argument2:PtrUInt):LongWord;
 
 {==============================================================================}
 {==============================================================================}
@@ -1324,7 +1324,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {SCSI Helper Functions}
-function SCSIGetCount:LongWord; inline;
+function SCSIGetCount:LongWord;
 {Get the current SCSI count}
 begin
  {}
@@ -1480,7 +1480,7 @@ end;
 
 {==============================================================================}
 
-function SCSIHostGetCount:LongWord; inline;
+function SCSIHostGetCount:LongWord;
 {Get the current Host count}
 begin
  {}
@@ -1589,7 +1589,7 @@ end;
 
 {==============================================================================}
 
-function SCSIStorageDeviceControl(Storage:PStorageDevice;Request:Integer;Argument1,Argument2:LongWord):LongWord;
+function SCSIStorageDeviceControl(Storage:PStorageDevice;Request:Integer;Argument1:PtrUInt;var Argument2:PtrUInt):LongWord;
 var
  SCSI:PSCSIDevice;
 begin

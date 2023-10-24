@@ -1,7 +1,7 @@
 {
 Ultibo Logging interface unit.
 
-Copyright (C) 2021 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -160,8 +160,9 @@ type
   {Logging Properties}
   Logging:TLoggingDevice;
   {Console Properties}
-  Console:PConsoleDevice;
-  Window:TWindowHandle;
+  Console:PConsoleDevice;  {The console device for logging output}
+  Window:TWindowHandle;    {The console window for logging output}
+  Existing:LongBool;       {True if the console window already existed when logging started}
  end;
  
 {==============================================================================}
@@ -209,6 +210,8 @@ function ConsoleLoggingStop(Logging:PLoggingDevice):LongWord;
 
 function ConsoleLoggingOutput(Logging:PLoggingDevice;const Data:String):LongWord;
 
+function ConsoleLoggingSetTarget(Logging:PLoggingDevice;const Target:String):LongWord;
+
 {==============================================================================}
 {RTL Text IO Functions}
 function SysTextIOWriteChar(ACh:Char;AUserData:Pointer):Boolean;
@@ -221,9 +224,9 @@ procedure SysLoggingOutputEx(AFacility,ASeverity:LongWord;const ATag,AContent:St
 
 {==============================================================================}
 {Logging Helper Functions}
-function LoggingDeviceGetCount:LongWord; inline;
+function LoggingDeviceGetCount:LongWord;
 
-function LoggingDeviceGetDefault:PLoggingDevice; inline;
+function LoggingDeviceGetDefault:PLoggingDevice;
 function LoggingDeviceSetDefault(Logging:PLoggingDevice):LongWord; 
 
 function LoggingDeviceCheck(Logging:PLoggingDevice):PLoggingDevice;
@@ -1084,6 +1087,8 @@ end;
 {==============================================================================}
 {Console Logging Functions}
 function ConsoleLoggingStart(Logging:PLoggingDevice):LongWord;
+{Implementation of LoggingDeviceStart API for Console Logging}
+{Note: Not intended to be called directly by applications, use LoggingDeviceStart instead}
 begin
  {}
  Result:=ERROR_INVALID_PARAMETER;
@@ -1100,11 +1105,18 @@ begin
  
     {Check Console}
     if PConsoleLogging(Logging).Console = nil then Exit;
-    
-    {Create Window}
-    PConsoleLogging(Logging).Window:=ConsoleWindowCreate(PConsoleLogging(Logging).Console,CONSOLE_LOGGING_POSITION,False);
-    if PConsoleLogging(Logging).Window = INVALID_HANDLE_VALUE then Exit;
-    
+
+    {Find Window}
+    PConsoleLogging(Logging).Window:=ConsoleWindowFind(PConsoleLogging(Logging).Console,CONSOLE_LOGGING_POSITION);
+    PConsoleLogging(Logging).Existing:=True;
+    if PConsoleLogging(Logging).Window = INVALID_HANDLE_VALUE then
+     begin
+      {Create Window}
+      PConsoleLogging(Logging).Window:=ConsoleWindowCreate(PConsoleLogging(Logging).Console,CONSOLE_LOGGING_POSITION,False);
+      PConsoleLogging(Logging).Existing:=False;
+      if PConsoleLogging(Logging).Window = INVALID_HANDLE_VALUE then Exit;
+     end;
+
     {Return Result}
     Result:=ERROR_SUCCESS;
    finally
@@ -1120,6 +1132,8 @@ end;
 {==============================================================================}
 
 function ConsoleLoggingStop(Logging:PLoggingDevice):LongWord;
+{Implementation of LoggingDeviceStop API for Console Logging}
+{Note: Not intended to be called directly by applications, use LoggingDeviceStop instead}
 begin
  {}
  Result:=ERROR_INVALID_PARAMETER;
@@ -1139,9 +1153,17 @@ begin
  
     {Check Window}
     if PConsoleLogging(Logging).Window = INVALID_HANDLE_VALUE then Exit;
-    
-    {Destroy Window}
-    Result:=ConsoleWindowDestroy(PConsoleLogging(Logging).Window);
+
+    {Check Existing}
+    if PConsoleLogging(Logging).Existing then
+     begin
+      Result:=ERROR_SUCCESS;
+     end
+    else
+     begin
+      {Destroy Window}
+      Result:=ConsoleWindowDestroy(PConsoleLogging(Logging).Window);
+     end;
    finally
     MutexUnlock(Logging.Lock);
    end; 
@@ -1155,6 +1177,8 @@ end;
 {==============================================================================}
 
 function ConsoleLoggingOutput(Logging:PLoggingDevice;const Data:String):LongWord;
+{Implementation of LoggingDeviceOutput API for Console Logging}
+{Note: Not intended to be called directly by applications, use LoggingDeviceOutput instead}
 begin
  {}
  Result:=ERROR_INVALID_PARAMETER;
@@ -1186,6 +1210,81 @@ begin
    finally
     MutexUnlock(Logging.Lock);
    end; 
+  end
+ else
+  begin
+   Result:=ERROR_CAN_NOT_COMPLETE;
+  end;
+end;
+
+{==============================================================================}
+
+function ConsoleLoggingSetTarget(Logging:PLoggingDevice;const Target:String):LongWord;
+{Implementation of LoggingDeviceSetTarget API for Console Logging}
+{Note: Not intended to be called directly by applications, use LoggingDeviceSetTarget instead}
+var
+ Console:PConsoleDevice;
+begin
+ {}
+ Result:=ERROR_INVALID_PARAMETER;
+
+ {Check Logging}
+ if Logging = nil then Exit;
+ if Logging.Device.Signature <> DEVICE_SIGNATURE then Exit; 
+
+ if MutexLock(Logging.Lock) = ERROR_SUCCESS then 
+  begin
+   try
+    {Check Logging}
+    if Logging.Device.Signature <> DEVICE_SIGNATURE then Exit;
+
+    {Check Target}
+    if Logging.Target <> Target then
+     begin
+      {Check Name}
+      Console:=ConsoleDeviceFindByName(Target);
+      if Console = nil then
+       begin
+        {Check Description}
+        Console:=ConsoleDeviceFindByDescription(Target);
+       end;
+
+      {Check Device}
+      if Console = nil then Exit;
+
+      {Check Window}
+      if not(PConsoleLogging(Logging).Existing) and (PConsoleLogging(Logging).Window <> INVALID_HANDLE_VALUE) then
+       begin
+        {Destroy Window}
+        ConsoleWindowDestroy(PConsoleLogging(Logging).Window);
+       end;
+
+      {Set Target}
+      Logging.Target:=Target;
+      UniqueString(Logging.Target);
+
+      Result:=ERROR_OPERATION_FAILED;
+
+      {Update Parameters}
+      PConsoleLogging(Logging).Console:=Console;
+
+      {Find Window}
+      PConsoleLogging(Logging).Window:=ConsoleWindowFind(PConsoleLogging(Logging).Console,CONSOLE_LOGGING_POSITION);
+      PConsoleLogging(Logging).Existing:=True;
+      if PConsoleLogging(Logging).Window = INVALID_HANDLE_VALUE then
+       begin
+        {Create Window}
+        PConsoleLogging(Logging).Window:=ConsoleWindowCreate(PConsoleLogging(Logging).Console,CONSOLE_LOGGING_POSITION,False);
+        PConsoleLogging(Logging).Existing:=False;
+        if PConsoleLogging(Logging).Window = INVALID_HANDLE_VALUE then Exit;
+       end;
+     end;
+
+    {Return Result}
+    Result:=ERROR_SUCCESS;
+   finally
+    MutexUnlock(Logging.Lock);
+   end;
   end
  else
   begin
@@ -1320,10 +1419,21 @@ begin
     begin
      WorkBuffer:=IntToHex(GetTickCount64,16) + ' - ' + WorkBuffer;
     end; 
-   if LOGGING_INCLUDE_DATETIME then
+   if LOGGING_INCLUDE_DATETIME or (LOGGING_INCLUDE_DATE and LOGGING_INCLUDE_TIME) then
     begin
-     WorkBuffer:=DateTimeToStr(Now) + ' - ' + WorkBuffer;
-    end; 
+     WorkBuffer:=SystemDateTimeToString(Now) + ' - ' + WorkBuffer;
+    end
+   else
+    begin
+     if LOGGING_INCLUDE_DATE then
+      begin
+       WorkBuffer:=SystemDateToString(Now) + ' - ' + WorkBuffer;
+      end;
+     if LOGGING_INCLUDE_TIME then
+      begin
+       WorkBuffer:=SystemTimeToString(Now) + ' - ' + WorkBuffer;
+      end;
+    end;
    if LOGGING_INCLUDE_COUNTER then
     begin
      WorkBuffer:=IntToHex(LoggingOutputCount,8) + ' - ' + WorkBuffer;
@@ -1358,9 +1468,20 @@ begin
     begin
      WorkBuffer:=IntToHex(GetTickCount64,16) + ' - ' + WorkBuffer;
     end; 
-   if LOGGING_INCLUDE_DATETIME then
+   if LOGGING_INCLUDE_DATETIME or (LOGGING_INCLUDE_DATE and LOGGING_INCLUDE_TIME) then
     begin
-     WorkBuffer:=DateTimeToStr(Now) + ' - ' + WorkBuffer;
+     WorkBuffer:=SystemDateTimeToString(Now) + ' - ' + WorkBuffer;
+    end
+   else
+    begin
+     if LOGGING_INCLUDE_DATE then
+      begin
+       WorkBuffer:=SystemDateToString(Now) + ' - ' + WorkBuffer;
+      end;
+     if LOGGING_INCLUDE_TIME then
+      begin
+       WorkBuffer:=SystemTimeToString(Now) + ' - ' + WorkBuffer;
+      end;
     end; 
    
    {Create Logging Entry}
@@ -1408,9 +1529,20 @@ begin
     begin
      WorkBuffer:=IntToHex(GetTickCount64,16) + ' - ' + WorkBuffer;
     end; 
-   if LOGGING_INCLUDE_DATETIME then
+   if LOGGING_INCLUDE_DATETIME or (LOGGING_INCLUDE_DATE and LOGGING_INCLUDE_TIME) then
     begin
-     WorkBuffer:=DateTimeToStr(Now) + ' - ' + WorkBuffer;
+     WorkBuffer:=SystemDateTimeToString(Now) + ' - ' + WorkBuffer;
+    end
+   else
+    begin
+     if LOGGING_INCLUDE_DATE then
+      begin
+       WorkBuffer:=SystemDateToString(Now) + ' - ' + WorkBuffer;
+      end;
+     if LOGGING_INCLUDE_TIME then
+      begin
+       WorkBuffer:=SystemTimeToString(Now) + ' - ' + WorkBuffer;
+      end;
     end; 
    if LOGGING_INCLUDE_COUNTER then
     begin
@@ -1446,9 +1578,20 @@ begin
     begin
      WorkBuffer:=IntToHex(GetTickCount64,16) + ' - ' + WorkBuffer;
     end; 
-   if LOGGING_INCLUDE_DATETIME then
+   if LOGGING_INCLUDE_DATETIME or (LOGGING_INCLUDE_DATE and LOGGING_INCLUDE_TIME) then
     begin
-     WorkBuffer:=DateTimeToStr(Now) + ' - ' + WorkBuffer;
+     WorkBuffer:=SystemDateTimeToString(Now) + ' - ' + WorkBuffer;
+    end
+   else
+    begin
+     if LOGGING_INCLUDE_DATE then
+      begin
+       WorkBuffer:=SystemDateToString(Now) + ' - ' + WorkBuffer;
+      end;
+     if LOGGING_INCLUDE_TIME then
+      begin
+       WorkBuffer:=SystemTimeToString(Now) + ' - ' + WorkBuffer;
+      end;
     end; 
    
    {Create Logging Entry}
@@ -1472,7 +1615,7 @@ end;
 {==============================================================================}
 {==============================================================================}
 {Logging Helper Functions}
-function LoggingDeviceGetCount:LongWord; inline;
+function LoggingDeviceGetCount:LongWord;
 {Get the current logging device count}
 begin
  {}
@@ -1481,7 +1624,7 @@ end;
 
 {==============================================================================}
 
-function LoggingDeviceGetDefault:PLoggingDevice; inline;
+function LoggingDeviceGetDefault:PLoggingDevice;
 {Get the current default logging device}
 begin
  {}
@@ -1695,6 +1838,8 @@ begin
        Logging.Logging.DeviceStart:=ConsoleLoggingStart;
        Logging.Logging.DeviceStop:=ConsoleLoggingStop;
        Logging.Logging.DeviceOutput:=ConsoleLoggingOutput;
+       Logging.Logging.DeviceSetTarget:=ConsoleLoggingSetTarget;
+       Logging.Logging.Target:=DeviceGetName(@Console.Device);
        {Console}
        Logging.Console:=Console;
        Logging.Window:=INVALID_HANDLE_VALUE;

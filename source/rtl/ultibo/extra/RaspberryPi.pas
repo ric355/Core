@@ -1,7 +1,7 @@
 {
 Ultibo Raspberry Pi unit.
 
-Copyright (C) 2016 - SoftOz Pty Ltd.
+Copyright (C) 2023 - SoftOz Pty Ltd.
 
 Arch
 ====
@@ -68,6 +68,10 @@ uses GlobalConfig,
      Console,
      Keyboard,
      Mouse,
+     HID,
+     USBHID,
+     HIDKeyboard,
+     HIDMouse,
      Filesystem,
      EXTFS,
      FATFS,
@@ -102,39 +106,13 @@ procedure RaspberryPiInit;
 {Initialize the RaspberryPi unit and parameters}
 
 {Note: Called only during system startup}
-var
- GPIOFirst:LongWord;
- GPIOLast:LongWord;
- ClockMaximum:LongWord;
 begin
  {}
  {Check Initialized}
  if RaspberryPiInitialized then Exit;
 
  {Check SDHOST}
- if BCM2708_REGISTER_SDHOST then
-  begin
-   {Set Parameters}
-   {Check SDHCI Enabled}
-   if BCM2708_REGISTER_SDHCI then
-    begin
-     {Use GPIO 22 to 27}
-     GPIOFirst:=GPIO_PIN_22; 
-     GPIOLast:=GPIO_PIN_27;
-    end
-   else
-    begin
-     {Use GPIO 48 to 53}
-     GPIOFirst:=GPIO_PIN_48; 
-     GPIOLast:=GPIO_PIN_53;
-    end;
-   {Get Clock Maximum}
-   ClockMaximum:=ClockGetRate(CLOCK_ID_MMC1);
-   if ClockMaximum = 0 then ClockMaximum:=BCM2708_SDHOST_MAX_FREQ;
-   
-   {Create Device}
-   BCMSDHOSTCreate(BCM2835_SDHOST_REGS_BASE,BCM2708_SDHOST_DESCRIPTION,BCM2835_IRQ_SDHOST,DMA_DREQ_ID_SDHOST,BCM2708_SDHOST_MIN_FREQ,ClockMaximum,GPIOFirst,GPIOLast,GPIO_FUNCTION_ALT0,BCM2708SDHOST_FIQ_ENABLED);
-  end;
+ {Note: SDHOST initialization moved to BCM2708Init}
 
  RaspberryPiInitialized:=True;
 end;
